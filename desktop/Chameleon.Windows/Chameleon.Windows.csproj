@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup>
+  <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+  <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
+  <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+  <AssemblyName>Chameleon</AssemblyName><RootNamespace>Chameleon.Windows</RootNamespace>
+  <Version>4.5.0</Version><ApplicationManifest>app.manifest</ApplicationManifest>
+  <ApplicationIcon>../../packaging/windows/assets/chameleon.ico</ApplicationIcon>
+  <RuntimeIdentifier>win-x64</RuntimeIdentifier><SelfContained>true</SelfContained>
+  <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion><TargetLatestRuntimePatch>false</TargetLatestRuntimePatch>
+  <PublishSingleFile>false</PublishSingleFile><DebugType>none</DebugType>
+  <Deterministic>true</Deterministic><NoWarn>$(NoWarn);WFO0003</NoWarn><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+ </PropertyGroup>
+<ItemGroup><Using Remove="System.Windows.Forms"/><Using Remove="System.Drawing"/></ItemGroup>
+</Project>

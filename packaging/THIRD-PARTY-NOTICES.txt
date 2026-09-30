@@ -1,0 +1,24 @@
+Chameleon VPN — preliminary release 4.1.0
+
+Chameleon-owned source retains the license published with the source repository.
+This does NOT mean that every bundled library or binary is MIT-licensed.
+
+Windows VPN engine: github.com/xjasonlyu/tun2socks/v2, GPL-3.0.
+The combined Windows executable is distributed subject to applicable GPL-3.0
+requirements, including access to corresponding source and build instructions.
+Full notices and corresponding-source information are included in the release
+source archive. See CORRESPONDING-SOURCE.txt and the source dependency inventory.
+
+Wintun 0.14.1: the PREBUILT DLL has its own vendor redistribution license, included
+in WINTUN-LICENSE.txt. It is not interchangeable with the Wintun source license.
+The DLL is downloaded from [ссылка удалена] and its
+SHA-256 is compiled into the broker. No additional Wintun products are bundled.
+
+Go and Go module libraries, AndroidX, gomobile, NDK and other dependencies retain
+their respective copyright and license terms. Dependency versions are pinned in
+go.mod/go.sum and the Android build files. Distribution of a general-availability
+release requires review of the complete dependency-license inventory.
+
+This beta is not a legal opinion or a claim that every redistribution question
+has been resolved. APK signing identifies this release key; Windows Authenticode
+signing and native-device acceptance remain release gates.
