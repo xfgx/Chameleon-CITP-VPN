@@ -21,7 +21,7 @@
 
 ## Сборка
 
-Требования: Go 1.26+, gomobile, Android SDK 34 + Gradle 8.7, .NET 8 SDK, NSIS 3.
+Требования: Go 1.26+, gomobile, Android SDK 34 + Gradle 8.7, .NET 10 SDK, NSIS 3.
 
 ```bash
 # ядро и консольные утилиты
