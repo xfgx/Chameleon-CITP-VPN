@@ -1,0 +1,34 @@
+[Unit]
+Description=Bounded VPN-carrier header metadata observer (no traffic payload storage)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/chameleon/observer.env
+ExecStart=/usr/local/libexec/chameleon/vpn-observer -node ${NODE_ID} -interfaces ${INTERFACES} -ports ${CARRIER_PORTS} -directory ${TELEMETRY_DIR} -captures /run/chameleon-observer/captures -capture-window /run/chameleon-observer/capture-enabled-until -max-bytes ${MAX_BYTES} -probe-host vpn.example.com
+RuntimeDirectory=chameleon-observer
+RuntimeDirectoryMode=0700
+UMask=0077
+User=root
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_RAW
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_PACKET AF_INET AF_INET6 AF_NETLINK
+ReadWritePaths=/run/chameleon-observer -/var/log/chameleon-observer
+MemoryMax=96M
+CPUQuota=20%
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

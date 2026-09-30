@@ -1,0 +1,35 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+android {
+    namespace 'com.chameleonvpn.app'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.chameleonvpn.client'
+        minSdk 23
+        targetSdk 34
+        versionCode 10
+        versionName '4.5.1'
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+    }
+    buildFeatures { buildConfig true }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug { minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    packaging { jniLibs { useLegacyPackaging = false } }
+}
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.aar'])
+    implementation 'androidx.core:core-ktx:1.13.1'
+}

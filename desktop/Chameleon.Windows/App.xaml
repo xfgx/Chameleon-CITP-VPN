@@ -1,0 +1,29 @@
+<Application x:Class="Chameleon.Windows.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Startup="Start">
+ <Application.Resources>
+  <SolidColorBrush x:Key="Canvas" Color="#0E1520"/><SolidColorBrush x:Key="Surface" Color="#192433"/>
+  <SolidColorBrush x:Key="Muted" Color="#ACBBCD"/><SolidColorBrush x:Key="Line" Color="#34465D"/>
+  <SolidColorBrush x:Key="Accent" Color="#318CE7"/><SolidColorBrush x:Key="Mint" Color="#7CDEC9"/>
+  <Style TargetType="TextBlock"><Setter Property="Foreground" Value="#F3F6FC"/><Setter Property="FontSize" Value="15"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+  <Style x:Key="Sub" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="LineHeight" Value="23"/></Style>
+  <Style x:Key="Heading" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
+  <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="16"/><Setter Property="Padding" Value="24"/><Setter Property="Margin" Value="0,0,0,16"/></Style>
+  <Style TargetType="Button">
+   <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="#25354A"/><Setter Property="BorderBrush" Value="#40536D"/><Setter Property="BorderThickness" Value="1"/>
+   <Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Padding" Value="20,13"/><Setter Property="MinHeight" Value="48"/><Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="Shape" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Shape" Property="Opacity" Value="0.85"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Shape" Property="Opacity" Value="0.65"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Shape" Property="BorderBrush" Value="#D2E7FF"/><Setter TargetName="Shape" Property="BorderThickness" Value="2"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Shape" Property="Opacity" Value="0.5"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="#226DB5"/><Setter Property="BorderBrush" Value="#448DCE"/></Style>
+  <Style x:Key="Nav" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Margin" Value="0,0,0,8"/><Setter Property="Padding" Value="12,13"/><Setter Property="HorizontalContentAlignment" Value="Left"/></Style>
+  <Style TargetType="PasswordBox"><Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="#0E1520"/><Setter Property="BorderBrush" Value="#56718F"/><Setter Property="BorderThickness" Value="1"/><Setter Property="FontSize" Value="16"/><Setter Property="Padding" Value="14"/><Setter Property="MinHeight" Value="50"/></Style>
+ </Application.Resources>
+</Application>

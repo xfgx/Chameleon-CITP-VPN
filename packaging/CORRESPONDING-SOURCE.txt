@@ -1,0 +1,14 @@
+Source repository: <repository-url>
+Release branch: feat/free-vpn-production
+Release source archive: Chameleon-4.3.0-source.tar.gz
+Release dependencies archive: Chameleon-4.1.0-go-dependencies.tar.gz
+
+The same download origin serves the source/dependency archives alongside binary
+release files. The release-manifest hash list and BUILD-RECEIPT.json bind the source
+commit and dependency versions to the binaries. Source and build scripts contain
+no issuer private key, personal entitlement, Telegram token or Android signing key.
+
+Builds are deliberately restricted to the owner's build-host/RU build nodes. See
+docs/product/BUILD-AND-RELEASE.md for the exact toolchain and reproduction commands.
+Third-party license copies and their pinned dependency source are in the dependency
+archive. Wintun's prebuilt DLL license is included separately.

@@ -1,0 +1,14 @@
+Chameleon VPN Windows 4.3.0 beta
+Source repository: <repository-url>
+Release branch: fix/client-ipc-rendering-protocol-4.3.0 (local build-host branch)
+Corresponding source archive: Chameleon-4.3.0-source.tar.gz
+Download source: [ссылка удалена]
+Go dependency source archive: Chameleon-4.1.0-go-dependencies.tar.gz
+Runtime Go dependencies are unchanged from 4.1.0.
+Build-only resource generator: github.com/akavel/rsrc v0.10.2
+Generator module checksum: h1:Zxm8V5eI1hW4gGaYsJQUhxpjkENuG91ki8B4zCrvEsw=
+
+Windows build procedure: scripts/build-windows-product.sh
+The build receipt binds Windows sources and artifacts. Android is 4.3.0 with the existing 4.1.0 native core.
+Licenses are in the licenses folder. No token/signing key/user entitlement is
+embedded in this universal installer. Native Windows acceptance remains required.

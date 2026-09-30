@@ -1,0 +1,40 @@
+[Unit]
+Description=Separate Telegram issuer of personally signed free VPN entitlements
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/chameleon/activation/telegram-token
+
+[Service]
+User=chameleon-issuer
+Group=chameleon-issuer
+EnvironmentFile=/etc/chameleon/activation/issuer.env
+LoadCredential=telegram_token:/etc/chameleon/activation/telegram-token
+LoadCredential=issuer_key:/etc/chameleon/activation/issuer.pem
+LoadCredential=privacy_salt:/etc/chameleon/activation/privacy-salt
+ExecStart=/opt/chameleon-issuer/venv/bin/python -B /opt/chameleon-issuer/bot.py
+StateDirectory=chameleon-issuer
+StateDirectoryMode=0700
+RuntimeDirectory=chameleon-issuer
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=192M
+CPUQuota=25%
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "app/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build ./...
+      - name: Build Windows
+        run: GOOS=windows GOARCH=amd64 go build ./cmd/chamd ./cmd/ks-vpn
+      - name: Vet
+        run: go vet ./internal/... ./mobilecore
+      - name: Test
+        run: go test -count=1 ./internal/clientactivation ./internal/ksprobe ./internal/telemetry ./mobilecore
