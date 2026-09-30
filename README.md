@@ -50,7 +50,7 @@ Chameleon — VPN-клиент и серверная часть для рабо�
 | Каталог | Что внутри |
 |---|---|
 | `android/` | Приложение Android (Kotlin, VpnService), Gradle-проект |
-| `desktop/Chameleon.Windows/` | Интерфейс Windows (WPF, .NET 8) |
+| `desktop/Chameleon.Windows/` | Интерфейс Windows (WPF, .NET 10) |
 | `mobilecore/` | Ядро для Android (gomobile): туннель, AUTO, раздельная маршрутизация |
 | `cmd/chamd/` | Служба-ядро Windows: брокер, Wintun, AUTO, DNS |
 | `cmd/cham-server/`, `cmd/cham-client/`, `cmd/cham-keygen/` | Сервер и консольный клиент CITP, генерация ключей |
@@ -71,7 +71,7 @@ Chameleon — VPN-клиент и серверная часть для рабо�
 
 ## Сборка
 
-Требования: Go 1.26+, для Android — gomobile, Android SDK 34 и Gradle 8.7, для Windows — .NET 8 SDK и NSIS 3.
+Требования: Go 1.26+, для Android — gomobile, Android SDK 34 и Gradle 8.7, для Windows — .NET 10 SDK и NSIS 3.
 
 ```bash
 git clone <repository-url> chameleon && cd chameleon
@@ -134,4 +134,4 @@ cham-server -keyfile server.key -allowfile clients.txt -listen 0.0.0.0:<port>
 
 ## Участие и лицензия
 
-Как предложить изменения — [`CONTRIBUTING.md`](CONTRIBUTING.md). Лицензия — [`LICENSE`](LICENSE), примечания — [`LICENSE-NOTICE.md`](LICENSE-NOTICE.md) и [`packaging/THIRD-PARTY-NOTICES.txt`](packaging/THIRD-PARTY-NOTICES.txt).
+Как предложить изменения — [`CONTRIBUTING.md`](CONTRIBUTING.md). Лицензия — MIT, см. [`LICENSE`](LICENSE), примечания — [`LICENSE-NOTICE.md`](LICENSE-NOTICE.md) и [`packaging/THIRD-PARTY-NOTICES.txt`](packaging/THIRD-PARTY-NOTICES.txt).
