@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 namespace Chameleon.Windows;
-internal static class AppInfo {internal const string Version="4.5.0";internal const string Channel="beta";}
+internal static class AppInfo {internal const string Version="4.6.0";internal const string Channel="beta";}
 internal sealed record UpdateInfo(string Version,string File,string Sha256,long Size);
 // In-app update: only the fixed official HTTPS site, no redirects. The installer is accepted only if its
 // size and SHA-256 match the manifest, the file name and PE version match the manifest version, and the

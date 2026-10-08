@@ -52,6 +52,7 @@ type TunDevice struct {
 	gateway         string
 	createdBypasses []string
 	createdCaptures []string
+	ruRoutes        []windows.MibIpForwardRow2 // RU-direct, см. rudirect_windows.go
 	engineActive    bool
 	socks           string // наш локальный SOCKS5 — пункт назначения движка
 }
@@ -275,6 +276,8 @@ func (t *TunDevice) setupRoutes(ifIdx string) error {
 			t.m.logf("tun: обход cover %s не добавлен: %v", ip, err)
 		}
 	}
+	// Российские сети напрямую (более специфичные, чем /1 захвата).
+	t.addRuDirect(gw)
 	// Захват: два /1 покрывают весь IPv4 и специфичнее default route.
 	if err := run("route", "add", "0.0.0.0", "mask", "128.0.0.0", tunGW, "metric", "1", "if", ifIdx); err != nil {
 		return err
@@ -335,6 +338,7 @@ func (t *TunDevice) removeRoutes() {
 		_ = run("route", "delete", ip, "mask", "255.255.255.255", t.gateway)
 	}
 	t.createdBypasses = nil
+	t.removeRuDirect()
 }
 
 func splitCIDR(cidr string) (string, string) {

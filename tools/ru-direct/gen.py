@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Generate the RU-direct (split tunnelling) IPv4 dataset shared by Android and Windows.
+
+RU set = RU GeoIP (ipverse country/ru, same snapshot as mobilecore/ru_bypass.go)
+       U every ip2asn range whose origin ASN is registered in RU
+         (covers RU services hosted on foreign address space, e.g. Yandex/VK edges).
+Private/special ranges and the tunnel resolvers (8.8.8.8 etc.) are never direct.
+
+Outputs (deterministic, sorted):
+  ru-direct-v4.txt          exclusion list: prefixes that go DIRECTLY (Android 13+ excludeRoute, Windows).
+  ru-direct-complement.txt  include list for Android < 13 (no excludeRoute): IPv4 minus direct set.
+
+Route budgets keep VpnService/Binder and Windows route tables small. When a budget is hit, the
+smallest RU prefixes are dropped first (they then simply stay inside the VPN, which is always
+safe). Prefixes of key RU services are never dropped; CDN/anti-DDoS/hosting prefixes that front
+most RU sites are never dropped from the exclusion list.
+
+Usage: python3 tools/ru-direct/gen.py --ip2asn ip2asn-v4.tsv.gz --out android/app/src/main/assets
+"""
+import argparse, gzip, hashlib, ipaddress, re
+
+KEY_SERVICE = re.compile(
+    r'YANDEX|VKONTAKTE|\bVK-|MAILRU|MAIL-RU|ODNOKLASSNIKI|SBERBANK|SBERTECH|TINKOFF|T-BANK|TCS-AS|OZON|WILDBERRIES|'
+    r'AVITO|ELECTRONIC-GOVERNMENT|ALFA-BANK|VTB|GAZPROMBANK|KASPERSKY|\bKL-|RUTUBE|KINOPOISK|\bIVI-|RAMBLER|2GIS|'
+    r'HEADHUNTER|NSPK|QIWI|Moscow Mayors Office|X5-RETAIL|MAGNIT', re.I)
+KEY_HOSTING = re.compile(
+    r'HLL-AS|SERVICEPIPE|STORMNETWORKS|STORMWALL|DDOS-GUARD|NGENIX|CDNVIDEO|EDGECENTER|SELECTEL|TIMEWEB|'
+    r'\bAS-REG\b|BEGET|CLOUDRU|DATALINE|IXCELLERATE|LINXDATACENTER|MASTERHOST|FIRSTBYTE', re.I)
+PRIVATE = [ipaddress.ip_network(n) for n in ('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8',
+           '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '224.0.0.0/3')]
+NEVER = [ipaddress.ip_network(n) for n in ('8.8.8.8/32', '8.8.4.4/32', '1.1.1.1/32', '1.0.0.1/32')]
+
+
+def geo_from_go(path):
+    out = []
+    for a, b in re.findall(r'\{0x([0-9a-f]+), 0x([0-9a-f]+)\}', open(path).read()):
+        out += ipaddress.summarize_address_range(ipaddress.IPv4Address(int(a, 16)), ipaddress.IPv4Address(int(b, 16)))
+    return out
+
+
+def asn_ranges(path):
+    ru, key, host = [], [], []
+    with gzip.open(path, 'rt', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            p = line.rstrip('\n').split('\t')
+            if len(p) < 5 or p[2] == '0' or p[3] != 'RU':
+                continue
+            nets = list(ipaddress.summarize_address_range(ipaddress.IPv4Address(p[0]), ipaddress.IPv4Address(p[1])))
+            ru += nets
+            if KEY_SERVICE.search(p[4]):
+                key += nets
+            elif KEY_HOSTING.search(p[4]):
+                host += nets
+    return ru, key, host
+
+
+def clean(nets):
+    out = []
+    for n in ipaddress.collapse_addresses(nets):
+        parts = [n]
+        for r in PRIVATE + NEVER:
+            nxt = []
+            for x in parts:
+                if not x.overlaps(r):
+                    nxt.append(x)
+                elif x.supernet_of(r) and x != r:
+                    nxt += list(x.address_exclude(r))
+            parts = nxt
+        out += parts
+    return list(ipaddress.collapse_addresses(out))
+
+
+def complement(nets):
+    res, cur = [], 0
+    for n in ipaddress.collapse_addresses(nets):
+        s = int(n.network_address)
+        if s > cur:
+            res += ipaddress.summarize_address_range(ipaddress.IPv4Address(cur), ipaddress.IPv4Address(s - 1))
+        cur = int(n.broadcast_address) + 1
+    if cur <= 0xFFFFFFFF:
+        res += ipaddress.summarize_address_range(ipaddress.IPv4Address(cur), ipaddress.IPv4Address(0xFFFFFFFF))
+    return res
+
+
+def fit(allnets, forced, budget, comp=False):
+    for maxlen in range(24, 7, -1):
+        sel = list(ipaddress.collapse_addresses([n for n in allnets if n.prefixlen <= maxlen] + forced))
+        emit = complement(sel + PRIVATE) if comp else sel
+        if len(emit) <= budget:
+            return maxlen, sel, emit
+    raise SystemExit('budget too small even for forced prefixes')
+
+
+def sha(path):
+    return hashlib.sha256(open(path, 'rb').read()).hexdigest()
+
+
+def write(path, hdr, note, nets):
+    with open(path, 'w') as f:
+        f.write('\n'.join(hdr + [note]) + '\n')
+        f.write('\n'.join(str(n) for n in nets) + '\n')
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--geo-go', default='mobilecore/ru_bypass.go')
+    ap.add_argument('--ip2asn', required=True)
+    ap.add_argument('--out', required=True)
+    ap.add_argument('--budget', type=int, default=4000)
+    ap.add_argument('--complement-budget', type=int, default=3500)
+    a = ap.parse_args()
+    ru, key, host = asn_ranges(a.ip2asn)
+    allnets, key, host = clean(geo_from_go(a.geo_go) + ru), clean(key), clean(host)
+    total = sum(n.num_addresses for n in allnets)
+    hdr = ['# Chameleon RU-direct IPv4 dataset (generated by tools/ru-direct/gen.py; do not edit)',
+           f'# geo: {a.geo_go} sha256={sha(a.geo_go)}',
+           f'# asn: iptoasn.com ip2asn-v4.tsv.gz sha256={sha(a.ip2asn)}',
+           f'# full RU set {len(allnets)} prefixes / {total} addresses; key services {len(key)}; CDN/hosting {len(host)}']
+    ml, sel, emit = fit(allnets, key + host, a.budget)
+    cov = sum(n.num_addresses for n in sel) / total * 100
+    write(f'{a.out}/ru-direct-v4.txt', hdr, f'# direct (exclude) list: {len(emit)} prefixes = RU up to /{ml} + key services + CDN/hosting; {cov:.2f}% of RU space', emit)
+    print(f'exclude: {len(emit)} prefixes (/{ml}), {cov:.2f}%')
+    ml2, sel2, emit2 = fit(allnets, key, a.complement_budget, comp=True)
+    cov2 = sum(n.num_addresses for n in sel2) / total * 100
+    write(f'{a.out}/ru-direct-complement.txt', hdr, f'# Android<13 tunnel (include) list: {len(emit2)} prefixes; direct = RU up to /{ml2} + key services; {cov2:.2f}% of RU space', emit2)
+    print(f'complement: {len(emit2)} prefixes (/{ml2}), {cov2:.2f}%')
+
+
+if __name__ == '__main__':
+    main()

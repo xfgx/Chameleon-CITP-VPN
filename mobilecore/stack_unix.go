@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
@@ -83,19 +84,91 @@ func startVPNStack(tunFd int32) (err error) {
 	return nil
 }
 
+// stopVPNStack отпускает TUN немедленно и не ждёт gVisor-стек.
 func stopVPNStack() {
-	defer func() { _ = recover() }()
-	tunnelMu.Lock()
-	defer tunnelMu.Unlock()
+	releaseVPNStack(detachVPNStack())
+}
 
-	if vpnStack != nil {
-		vpnStack.Close()
-		vpnStack.Wait()
-		vpnStack = nil
+// vpnStackHandle — снятый с глобальных переменных стек, который ещё нужно
+// разобрать. Разборка идёт вне mu/tunnelMu.
+type vpnStackHandle struct {
+	st  *stack.Stack
+	dev device.Device
+}
+
+// detachVPNStack забирает текущий стек под tunnelMu (вызывать можно под mu:
+// порядок блокировок mu → tunnelMu). Новый Start не пострадает от старой
+// разборки — ему достанутся уже чистые переменные.
+func detachVPNStack() vpnStackHandle {
+	tunnelMu.Lock()
+	h := vpnStackHandle{st: vpnStack, dev: vpnDev}
+	vpnStack, vpnDev = nil, nil
+	tunnelMu.Unlock()
+	return h
+}
+
+// nicDetachGrace — сколько ждём штатного снятия NIC (остановка читателя fd).
+const nicDetachGrace = 1500 * time.Millisecond
+
+// releaseVPNStack разбирает стек за ограниченное время.
+//
+// Раньше здесь было vpnStack.Close(); vpnStack.Wait(); vpnDev.Close() под
+// глобальными блокировками. Stack.Wait() ждёт завершения ВСЕХ TCP-эндпоинтов
+// и только в самом конце снимает NIC и закрывает дубликат tun-fd. После
+// долгого сеанса (сотни соединений, зависшие relay/FIN-обмены через уже
+// мёртвый сеанс) Wait мог не вернуться никогда: fd оставался открытым,
+// Android держал VPN-интерфейс, а mu/tunnelMu оставались захвачены —
+// «Отключить» переставала работать. Сразу после подключения эндпоинтов нет,
+// поэтому там отключение срабатывало.
+//
+// Теперь: 1) снимаем NIC (останавливает читателя fd и закрывает fd через
+// FD.Close), ждём не дольше nicDetachGrace; 2) закрываем fd в любом случае;
+// 3) Abort/Wait эндпоинтов — только в фоне, никого не блокируя.
+func releaseVPNStack(h vpnStackHandle) {
+	if h.st == nil && h.dev == nil {
+		return
 	}
-	if vpnDev != nil {
-		vpnDev.Close()
-		vpnDev = nil
+	t0 := time.Now()
+	if h.st != nil {
+		detached := make(chan struct{})
+		go func() {
+			defer close(detached)
+			defer func() { _ = recover() }()
+			for id := range h.st.NICInfo() {
+				_ = h.st.RemoveNIC(id)
+			}
+		}()
+		select {
+		case <-detached:
+		case <-time.After(nicDetachGrace):
+			logf("стек: снятие NIC не уложилось в %v — закрываем tun принудительно", nicDetachGrace)
+		}
 	}
-	tunnelRunning = false
+	if h.dev != nil {
+		func() {
+			defer func() { _ = recover() }()
+			h.dev.Close() // идемпотентно: FD.Close уже мог вызвать RemoveNIC
+		}()
+	}
+	logf("стек: tun закрыт за %d мс", time.Since(t0).Milliseconds())
+	if h.st != nil {
+		st := h.st
+		go func() {
+			defer func() { _ = recover() }()
+			st.Close()
+			done := make(chan struct{})
+			go func() {
+				defer func() { _ = recover() }()
+				st.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				logf("стек: эндпоинты не завершились за 30 с (фоновая разборка, туннель уже отпущен)")
+			}
+		}()
+	}
+	// tunnel.T() остаётся запущенным (ProcessAsync один на процесс):
+	// повторный ProcessAsync без Close плодил бы обработчики.
 }

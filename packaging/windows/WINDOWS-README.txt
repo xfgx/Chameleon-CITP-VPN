@@ -1,7 +1,12 @@
-Chameleon VPN 4.5.0 beta — Windows x64
+Chameleon VPN 4.6.0 beta — Windows x64
 
 Native C# WPF / .NET 10 self-contained UI; Go LocalSystem broker.
 No .NET download is required on the user's machine. Windows 10/11 x64.
+4.6.0: «Российские сайты напрямую» (tab «Протокол», on by default): Russian
+networks and DNS for Russian domains bypass the VPN; everything else stays in
+the tunnel. See docs/RU-DIRECT.md.
+4.5.1: animated interface (buttons, sections, status, power mark); follows the
+Windows «Show animations» setting. Broker and VPN core are unchanged from 4.5.0.
 Install over 4.3.0/4.4.x after closing the old app. Since 4.5.0 the «Обновления»
 tab checks the official site and installs newer versions itself (size, SHA-256
 and version are verified; VPN is disconnected first; the app reopens after update). Since 4.4.1 the app always

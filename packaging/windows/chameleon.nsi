@@ -9,7 +9,7 @@ Var UpdateMode
 !ifndef OUTPUT
 !error "OUTPUT is required"
 !endif
-Name "Chameleon VPN 4.5.0 beta"
+Name "Chameleon VPN 4.6.0 beta"
 OutFile "${OUTPUT}"
 InstallDir "$PROGRAMFILES64\Chameleon VPN"
 InstallDirRegKey HKLM "Software\ChameleonFreeVPN" "InstallDir"
@@ -20,10 +20,10 @@ ShowUninstDetails show
 !define MUI_ABORTWARNING
 !define MUI_ICON "${BUILD_DIR}/chameleon.ico"
 !define MUI_UNICON "${BUILD_DIR}/chameleon.ico"
-VIProductVersion "4.5.0.0"
+VIProductVersion "4.6.0.0"
 VIAddVersionKey /LANG=1033 "ProductName" "Chameleon VPN"
 VIAddVersionKey /LANG=1033 "FileDescription" "Chameleon VPN installer"
-VIAddVersionKey /LANG=1033 "FileVersion" "4.5.0"
+VIAddVersionKey /LANG=1033 "FileVersion" "4.6.0"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Chameleon project"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${BUILD_DIR}/THIRD-PARTY-NOTICES.txt"
@@ -126,8 +126,8 @@ Section "Chameleon VPN"
   WriteRegStr HKLM "Software\Classes\chameleon-vpn" "URL Protocol" ""
   WriteRegStr HKLM "Software\Classes\chameleon-vpn\shell\open\command" "" '"$INSTDIR\app\Chameleon.exe" -activate "%1"'
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChameleonFreeVPN" "DisplayName" "Chameleon VPN 4.5.0 beta"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChameleonFreeVPN" "DisplayVersion" "4.5.0"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChameleonFreeVPN" "DisplayName" "Chameleon VPN 4.6.0 beta"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChameleonFreeVPN" "DisplayVersion" "4.6.0"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChameleonFreeVPN" "DisplayIcon" "$INSTDIR\app\Chameleon.exe,0"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChameleonFreeVPN" "Publisher" "Chameleon project"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChameleonFreeVPN" "UninstallString" '"$INSTDIR\Uninstall.exe"'

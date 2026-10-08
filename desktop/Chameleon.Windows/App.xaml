@@ -10,15 +10,21 @@
   <Style TargetType="Button">
    <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="#25354A"/><Setter Property="BorderBrush" Value="#40536D"/><Setter Property="BorderThickness" Value="1"/>
    <Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Padding" Value="20,13"/><Setter Property="MinHeight" Value="48"/><Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+   <!-- 4.5.1: layers for Motion.cs — hover glow, press ripple (clipped to the rounded shape) and a caption that can cross-fade.
+        Press scale and the disabled fade are animated in code; the spacer border keeps the 4.5.0 metrics. -->
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-    <Border x:Name="Shape" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="{TemplateBinding Padding}">
-     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
-    </Border>
+    <Grid x:Name="Root">
+     <Border x:Name="Shape" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10"/>
+     <Border x:Name="Glow" Background="White" CornerRadius="10" Opacity="0" IsHitTestVisible="False"/>
+     <Canvas x:Name="Ripples" IsHitTestVisible="False"/>
+     <Border BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+      <ContentPresenter x:Name="Presenter" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
+     </Border>
+    </Grid>
     <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Shape" Property="Opacity" Value="0.85"/></Trigger>
-     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Shape" Property="Opacity" Value="0.65"/></Trigger>
      <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Shape" Property="BorderBrush" Value="#D2E7FF"/><Setter TargetName="Shape" Property="BorderThickness" Value="2"/></Trigger>
-     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Shape" Property="Opacity" Value="0.5"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Root" Property="Opacity" Value="0.5"/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
   </Style>

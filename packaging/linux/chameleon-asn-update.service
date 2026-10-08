@@ -1,0 +1,8 @@
+[Unit]
+Description=Chameleon: update offline IP-to-ASN table for vpn-observer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/chameleon/chameleon-update-asn-db.sh

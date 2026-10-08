@@ -12,3 +12,9 @@ func startVPNStack(tunFd int32) error {
 }
 
 func stopVPNStack() {}
+
+type vpnStackHandle struct{}
+
+func detachVPNStack() vpnStackHandle { return vpnStackHandle{} }
+
+func releaseVPNStack(vpnStackHandle) {}

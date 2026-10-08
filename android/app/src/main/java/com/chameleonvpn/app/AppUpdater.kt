@@ -56,7 +56,14 @@ object AppUpdater {
   for(i in 0 until maxOf(x.size,y.size)){val c=(x.getOrElse(i){0}).compareTo(y.getOrElse(i){0});if(c!=0)return c}
   return 0
  }
- fun isNewer(release:AppRelease)=compareVersions(release.version,BuildConfig.VERSION_NAME)>0
+ /**
+  * Installed version is read from PackageManager at runtime. BuildConfig.VERSION_NAME is a
+  * compile-time constant that Kotlin inlines into callers; an incremental build left the old
+  * "4.5.1" inside 4.5.2, so the app showed the previous version and offered a no-op update.
+  */
+ @Suppress("DEPRECATION")
+ fun installedVersion(context:Context):String=try{context.packageManager.getPackageInfo(context.packageName,0).versionName?:BuildConfig.VERSION_NAME}catch(_:Throwable){BuildConfig.VERSION_NAME}
+ fun isNewer(context:Context,release:AppRelease)=compareVersions(release.version,installedVersion(context))>0
 
  private fun updateDir(context:Context)=File(context.cacheDir,"updates").apply{mkdirs()}
  fun cleanup(context:Context){try{updateDir(context).listFiles()?.forEach{it.delete()}}catch(_:Throwable){}}

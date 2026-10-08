@@ -8,21 +8,27 @@
  <Grid Width="884" Height="581"><Grid.ColumnDefinitions><ColumnDefinition Width="196"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
   <Border Background="#141E2C" BorderBrush="#25354A" BorderThickness="0,0,1,0" Padding="18,24">
    <DockPanel LastChildFill="True">
-    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,28">
+    <StackPanel x:Name="Brand" DockPanel.Dock="Top" Margin="0,0,0,28">
      <StackPanel Orientation="Horizontal">
-      <Border Background="{StaticResource Mint}" Width="34" Height="34" CornerRadius="10" Margin="0,0,9,0"><TextBlock Text="C" Foreground="#10212A" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+      <Border x:Name="LogoMark" Background="{StaticResource Mint}" Width="34" Height="34" CornerRadius="10" Margin="0,0,9,0"><TextBlock Text="C" Foreground="#10212A" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
       <TextBlock Text="Chameleon" FontWeight="SemiBold" FontSize="19" VerticalAlignment="Center"/>
      </StackPanel>
      <TextBlock Text="ПЕРСОНАЛЬНЫЙ VPN" Foreground="{StaticResource Muted}" FontSize="11" Margin="2,14,0,0"/>
     </StackPanel>
-    <StackPanel DockPanel.Dock="Bottom"><TextBlock Text="WINDOWS · x64 · Администратор" Foreground="{StaticResource Muted}" FontSize="12"/><TextBlock x:Name="VersionText" Text="beta" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/></StackPanel>
-    <StackPanel>
-     <Button x:Name="NavHome" Style="{StaticResource Nav}" Content="Подключение" Tag="Home" Click="Navigate"/>
-     <Button x:Name="NavAccess" Style="{StaticResource Nav}" Content="Мой доступ" Tag="Access" Click="Navigate"/>
-     <Button x:Name="NavProtocol" Style="{StaticResource Nav}" Content="Протокол" Tag="Protocol" Click="Navigate"/>
-     <Button x:Name="NavDiagnostics" Style="{StaticResource Nav}" Content="Диагностика" Tag="Diagnostics" Click="Navigate"/>
-     <Button x:Name="NavUpdates" Style="{StaticResource Nav}" Content="Обновления" Tag="Updates" Click="Navigate"/>
-    </StackPanel>
+    <StackPanel x:Name="SideFooter" DockPanel.Dock="Bottom"><TextBlock Text="WINDOWS · x64 · Администратор" Foreground="{StaticResource Muted}" FontSize="12"/><TextBlock x:Name="VersionText" Text="beta" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/></StackPanel>
+    <Grid>
+     <!-- Selected-section marker: slides between sections (MainWindow.Motion.cs). -->
+     <Border x:Name="NavIndicator" VerticalAlignment="Top" Height="48" Background="#223C53" CornerRadius="10" IsHitTestVisible="False">
+      <Border x:Name="NavAccent" Width="3" Height="18" CornerRadius="1.5" Background="{StaticResource Mint}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0"/>
+     </Border>
+     <StackPanel x:Name="NavList">
+      <Button x:Name="NavHome" Style="{StaticResource Nav}" Content="Подключение" Tag="Home" Click="Navigate"/>
+      <Button x:Name="NavAccess" Style="{StaticResource Nav}" Content="Мой доступ" Tag="Access" Click="Navigate"/>
+      <Button x:Name="NavProtocol" Style="{StaticResource Nav}" Content="Протокол" Tag="Protocol" Click="Navigate"/>
+      <Button x:Name="NavDiagnostics" Style="{StaticResource Nav}" Content="Диагностика" Tag="Diagnostics" Click="Navigate"/>
+      <Button x:Name="NavUpdates" Style="{StaticResource Nav}" Content="Обновления" Tag="Updates" Click="Navigate"/>
+     </StackPanel>
+    </Grid>
    </DockPanel>
   </Border>
   <DockPanel Grid.Column="1" Margin="28,24">
@@ -34,15 +40,23 @@
      <Border Style="{StaticResource Card}" Padding="22">
       <StackPanel>
        <DockPanel Margin="0,0,0,16">
-        <Border DockPanel.Dock="Left" Width="72" Height="72" Background="#223C53" CornerRadius="36" Margin="0,0,20,0" VerticalAlignment="Center">
-         <Viewbox Width="34" Height="34"><Canvas Width="40" Height="40"><Path x:Name="PowerIcon" Data="M20,2 L20,20 M10,7 A17,17 0 1 0 30,7" Stroke="#8FC6FF" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas></Viewbox>
-        </Border>
+        <!-- Power mark: breathing rings while protected, spinning arc while connecting (MainWindow.Motion.cs). -->
+        <Grid x:Name="PowerMark" DockPanel.Dock="Left" Width="72" Height="72" Margin="0,0,20,0" VerticalAlignment="Center">
+         <Ellipse x:Name="PowerRingA" Stroke="#7CDEC9" StrokeThickness="2" Opacity="0" IsHitTestVisible="False"/>
+         <Ellipse x:Name="PowerRingB" Stroke="#7CDEC9" StrokeThickness="2" Opacity="0" IsHitTestVisible="False"/>
+         <Border x:Name="PowerDisc" Background="#223C53" CornerRadius="36">
+          <Viewbox Width="34" Height="34"><Canvas Width="40" Height="40"><Path x:Name="PowerIcon" Data="M20,2 L20,20 M10,7 A17,17 0 1 0 30,7" Stroke="#8FC6FF" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas></Viewbox>
+         </Border>
+         <Path x:Name="PowerSpinner" Width="72" Height="72" Data="M36,3 A33,33 0 0 1 67.01,47.29" Stroke="#8FC6FF" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0" IsHitTestVisible="False"/>
+        </Grid>
         <StackPanel VerticalAlignment="Center">
          <TextBlock x:Name="StatusTitle" Text="Проверяем службу" FontSize="24" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
          <TextBlock x:Name="StatusDetail" Text="Подключение ещё не установлено." Style="{StaticResource Sub}" FontSize="14" LineHeight="20" Margin="0,6,0,0" MaxHeight="60" TextTrimming="WordEllipsis"/>
         </StackPanel>
        </DockPanel>
-       <ProgressBar x:Name="Progress" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,0,0,12"/>
+       <Border x:Name="ProgressSlot" Height="0" Opacity="0" ClipToBounds="True">
+        <ProgressBar x:Name="Progress" Height="3" VerticalAlignment="Top" Margin="0,0,0,12" Foreground="{StaticResource Mint}" Background="#25354A" BorderThickness="0"/>
+       </Border>
        <Button x:Name="ConnectButton" Content="Подключить VPN" Style="{StaticResource Primary}" Click="Connect"/>
       </StackPanel>
      </Border>
@@ -70,6 +84,7 @@
      <Border Style="{StaticResource Card}" Padding="18,14" Margin="0,0,0,12"><DockPanel><Button x:Name="ChooseAuto" DockPanel.Dock="Right" Width="150" MinHeight="44" Padding="12,9" Content="Выбрать AUTO" Tag="auto" Click="ChooseProtocol" Margin="16,0,0,0"/><StackPanel VerticalAlignment="Center"><TextBlock Text="AUTO" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="Приложение само проверяет KS и CITP и подключает тот, что работает в вашей сети. Запоминает удачный вариант." Style="{StaticResource Sub}" FontSize="13" LineHeight="18" Margin="0,4,0,0"/></StackPanel></DockPanel></Border>
      <Border Style="{StaticResource Card}" Padding="18,14" Margin="0,0,0,12"><DockPanel><Button x:Name="ChooseCitp" DockPanel.Dock="Right" Width="150" MinHeight="44" Padding="12,9" Content="Выбрать CITP" Tag="citp" Click="ChooseProtocol" Margin="16,0,0,0"/><StackPanel VerticalAlignment="Center"><TextBlock Text="CITP" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="Защищённый мультиплексированный транспорт поверх TCP. Устойчив в строгих сетях." Style="{StaticResource Sub}" FontSize="13" LineHeight="18" Margin="0,4,0,0"/></StackPanel></DockPanel></Border>
      <Border Style="{StaticResource Card}" Padding="18,14" Margin="0,0,0,12"><DockPanel><Button x:Name="ChooseKs" DockPanel.Dock="Right" Width="150" MinHeight="44" Padding="12,9" Content="Выбрать KS" Tag="ks" Click="ChooseProtocol" Margin="16,0,0,0"/><StackPanel VerticalAlignment="Center"><TextBlock Text="KS" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="Быстрый транспорт через UDP. Нужны доступность UDP и точное системное время." Style="{StaticResource Sub}" FontSize="13" LineHeight="18" Margin="0,4,0,0"/></StackPanel></DockPanel></Border>
+     <Border Style="{StaticResource Card}" Padding="18,14" Margin="0,4,0,12"><DockPanel><Button x:Name="RuDirectToggle" DockPanel.Dock="Right" Width="150" MinHeight="44" Padding="12,9" Content="Включено" Click="ToggleRuDirect" Margin="16,0,0,0" AutomationProperties.Name="Российские сайты напрямую"/><StackPanel VerticalAlignment="Center"><TextBlock Text="Российские сайты напрямую" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="Сайты и сервисы РФ (Госуслуги, банки, Яндекс, VK, маркетплейсы) открываются напрямую с вашего адреса. Остальной трафик, включая зарубежные сервисы, идёт через VPN." Style="{StaticResource Sub}" FontSize="13" LineHeight="18" Margin="0,4,0,0"/></StackPanel></DockPanel></Border>
      <TextBlock x:Name="ProtocolNotice" Text="Для смены протокола сначала отключите VPN." Style="{StaticResource Sub}" FontSize="13" LineHeight="18"/>
     </StackPanel>
     <StackPanel x:Name="Diagnostics" Visibility="Collapsed">
@@ -93,7 +108,7 @@
       <TextBlock x:Name="UpdateTitle" Text="Проверяем обновления" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
       <TextBlock x:Name="UpdateDetail" Text="Связываемся с сайтом Chameleon…" Style="{StaticResource Sub}" FontSize="14" LineHeight="20" Margin="0,8,0,0" Height="60" TextTrimming="WordEllipsis"/>
       <TextBlock x:Name="InstalledVersion" Style="{StaticResource Sub}" FontSize="12" LineHeight="17" Margin="0,4,0,12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
-      <ProgressBar x:Name="UpdateProgress" Height="4" Minimum="0" Maximum="1" Visibility="Hidden" Margin="0,0,0,14"/>
+      <ProgressBar x:Name="UpdateProgress" Height="4" Minimum="0" Maximum="1" Visibility="Hidden" Margin="0,0,0,14" Foreground="{StaticResource Mint}" Background="#25354A" BorderThickness="0"/>
       <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
        <Button x:Name="UpdateButton" Content="Обновить" Style="{StaticResource Primary}" Click="InstallUpdate" IsEnabled="False"/><Button x:Name="CheckUpdateButton" Grid.Column="2" Content="Проверить обновления" Click="CheckUpdates"/>
       </Grid>

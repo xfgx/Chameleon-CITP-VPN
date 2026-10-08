@@ -19,6 +19,6 @@ public partial class App : Application {
   }
   ShutdownMode=ShutdownMode.OnExplicitShutdown;
   var signal=showSignal;new Thread(()=>{while(true){try{signal.WaitOne();}catch{return;}ShowRequested?.Invoke();}}){IsBackground=true,Name="show-signal"}.Start();
-  var window=new MainWindow(); MainWindow=window; window.Show();
+  Motion.Install();var window=new MainWindow(); MainWindow=window; window.Show();
  }
 }

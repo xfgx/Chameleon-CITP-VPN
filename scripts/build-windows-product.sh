@@ -15,6 +15,7 @@ checksum="$(sha256sum "$out/wintun.dll" | cut -d' ' -f1)"
 python3 scripts/test-windows-packaging.py
 python3 scripts/test-windows-ipc.py
 python3 scripts/test-client-440.py
+python3 scripts/test-windows-motion.py
 go test ./cmd/chamd ./internal/clientactivation ./internal/desktopui ./internal/chaossync ./internal/ksprobe
 go vet ./cmd/chamd ./internal/clientactivation
 resource=cmd/chamd/resource_windows_amd64.syso
@@ -37,10 +38,10 @@ export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 cat "$HOME/.nuget/packages/microsoft.netcore.app.runtime.win-x64/10.0.12/LICENSE.TXT" "$HOME/.nuget/packages/microsoft.windowsdesktop.app.runtime.win-x64/10.0.12/LICENSE" > "$out/DOTNET-LICENSE.txt"
 cp "$HOME/.nuget/packages/microsoft.netcore.app.runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT" "$out/DOTNET-THIRD-PARTY-NOTICES.txt"
 python3 scripts/verify-wpf-resources.py "$out/app/Chameleon.exe"
-makensis -V3 "-DBUILD_DIR=$out" "-DOUTPUT=$out/Chameleon-4.5.0-windows-setup.exe" packaging/windows/chameleon.nsi
+makensis -V3 "-DBUILD_DIR=$out" "-DOUTPUT=$out/Chameleon-4.6.0-windows-setup.exe" packaging/windows/chameleon.nsi
 python3 - "$out" <<'RECEIPT'
 import hashlib,json,pathlib,subprocess,sys
-out=pathlib.Path(sys.argv[1]); names=['ChameleonBroker.exe','broker-setup.exe','IPC-SELFTEST.exe','chameleon.ico','wintun.dll','Chameleon-4.5.0-windows-setup.exe']
-value={'version':1,'product_version':'4.5.0','build_node':'build-host','source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'native_windows_acceptance':False,'authenticode_signed':False,'resource_generator':'github.com/akavel/rsrc@v0.10.2','frontend':'C# / WPF / .NET 10.0.401 self-contained','artifacts':{n:{'bytes':(out/n).stat().st_size,'sha256':hashlib.sha256((out/n).read_bytes()).hexdigest()} for n in names+[str(p.relative_to(out)) for p in sorted((out/'app').rglob('*')) if p.is_file()]}}
+out=pathlib.Path(sys.argv[1]); names=['ChameleonBroker.exe','broker-setup.exe','IPC-SELFTEST.exe','chameleon.ico','wintun.dll','Chameleon-4.6.0-windows-setup.exe']
+value={'version':1,'product_version':'4.6.0','build_node':'build-host','source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'native_windows_acceptance':False,'authenticode_signed':False,'resource_generator':'github.com/akavel/rsrc@v0.10.2','frontend':'C# / WPF / .NET 10.0.401 self-contained','artifacts':{n:{'bytes':(out/n).stat().st_size,'sha256':hashlib.sha256((out/n).read_bytes()).hexdigest()} for n in names+[str(p.relative_to(out)) for p in sorted((out/'app').rglob('*')) if p.is_file()]}}
 (out/'WINDOWS-BUILD-RECEIPT.json').write_text(json.dumps(value,indent=2)+'\n')
 RECEIPT

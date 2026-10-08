@@ -209,16 +209,17 @@ func ServerHandshake(c net.Conn, staticPriv *ecdh.PrivateKey, allowlist map[[32]
 	}
 	var nonce [16]byte
 	copy(nonce[:], payload[8:24])
-	if serverReplay.seenOrAdd(nonce, replayTTL) {
-		return nil, nil, ErrAuth // replay: тот же ответ, что зонду — молчание
-	}
 	clientPub := payload[24:56]
-	if len(allowlist) > 0 {
-		var cp [32]byte
-		copy(cp[:], clientPub)
-		if !allowlist[cp] {
-			return nil, nil, ErrAuth // чужое устройство: молчим
-		}
+	var cp [32]byte
+	copy(cp[:], clientPub)
+	// Белый список проверяется ДО записи в кэш повторов: иначе любой, кто
+	// знает публичный ключ ноды, заполнял бы кэш мусорными nonce и отключал
+	// новые подключения всем клиентам. Кэш разбит по ключу клиента.
+	if len(allowlist) > 0 && !allowlist[cp] {
+		return nil, nil, ErrAuth // чужое устройство: молчим
+	}
+	if serverReplay.seenOrAddFor(cp, nonce, replayTTL) {
+		return nil, nil, ErrAuth // replay: тот же ответ, что зонду — молчание
 	}
 
 	spriv, err := ecdh.X25519().GenerateKey(rand.Reader)

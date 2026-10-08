@@ -17,6 +17,8 @@ import javax.crypto.spec.GCMParameterSpec
 class ProfileStore(private val context: Context) {
  @Synchronized fun protocol():String=read().optString("protocol","auto").let{if(it in setOf("ks","citp")) it else "auto"}
  @Synchronized fun setProtocol(mode:String){require(mode in setOf("auto","citp","ks"));write(read().put("protocol",mode))}
+ @Synchronized fun ruDirect():Boolean=read().optBoolean("ru_direct",true)
+ @Synchronized fun setRuDirect(enabled:Boolean){write(read().put("ru_direct",enabled))}
 
     @Synchronized fun activationSeed():String{val data=read();val old=data.optString("activation_seed");if(old.isNotEmpty())return old;val seed=mobilecore.Mobilecore.genActivationKey();require(seed.isNotEmpty()){ "Не удалось создать ключ установки" };write(data.put("activation_seed",seed));return seed}
     @Synchronized fun activationToken():String=read().optString("activation_token")

@@ -29,6 +29,7 @@ type brokerRequest struct {
 	Protocol    string                        `json:"protocol,omitempty"`
 	Command     string                        `json:"command"`
 	Credentials *clientactivation.Credentials `json:"credentials,omitempty"`
+	RuDirect    *bool                         `json:"ru_direct,omitempty"` // nil = on
 }
 type brokerResponse struct {
 	Version int    `json:"version"`
@@ -274,6 +275,9 @@ func (s *productSession) acceptDNS(ctx context.Context) {
 		case slots <- struct{}{}:
 			go func() {
 				defer func() { <-slots }()
+				if handleRuDNS(s.dns, src, query) {
+					return
+				}
 				if s.ks != nil {
 					handleKSDNS(s.dns, src, query)
 				} else {
@@ -455,6 +459,7 @@ func handleBroker(ctx context.Context, c *winipc.Conn) {
 			_ = c.Send(brokerResponse{Version: 1, State: "error", Message: "Нет персонального ключа"})
 			return
 		}
+		ruDirectEnabled.Store(request.RuDirect == nil || *request.RuDirect)
 		_ = connectProduct(ctx, sid, *request.Credentials, request.Protocol)
 	case "disconnect":
 		if disconnectProduct(sid, false) != nil {

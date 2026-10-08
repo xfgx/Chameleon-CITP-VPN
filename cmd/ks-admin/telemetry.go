@@ -44,6 +44,7 @@ func rememberFlowLocked(event telemetry.Event) {
 		flowState.seenOrder = flowState.seenOrder[1:]
 	}
 	flowState.rows = append(flowState.rows, event)
+	rememberQualityLocked(event)
 	if len(flowState.rows) > 6000 {
 		flowState.rows = flowState.rows[len(flowState.rows)-6000:]
 	}

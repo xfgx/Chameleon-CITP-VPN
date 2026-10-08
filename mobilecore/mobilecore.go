@@ -492,7 +492,6 @@ func Start(addr, pubkey, clientPriv string, tunFd int32, p Protector) (errStr st
 	mu.Unlock()
 
 	fail = func(e error) string {
-		stopVPNStack()
 		mu.Lock()
 		running = false
 		modeName.Store("")
@@ -500,15 +499,19 @@ func Start(addr, pubkey, clientPriv string, tunFd int32, p Protector) (errStr st
 			cancel()
 			cancel = nil
 		}
-		if socksLn != nil {
-			socksLn.Close()
-			socksLn = nil
-		}
-		if mx != nil {
-			mx.Conn().Close()
-			mx = nil
-		}
+		h := detachVPNStack()
+		ln := socksLn
+		socksLn = nil
+		m := mx
+		mx = nil
 		mu.Unlock()
+		releaseVPNStack(h)
+		if ln != nil {
+			_ = ln.Close()
+		}
+		if m != nil {
+			closeBounded(func() { _ = m.Conn().Close() }, time.Second)
+		}
 		logf("ошибка запуска: %v", e)
 		return e.Error()
 	}
@@ -561,6 +564,10 @@ func Start(addr, pubkey, clientPriv string, tunFd int32, p Protector) (errStr st
 }
 
 // Stop останавливает стек, SOCKS и сеанс к ноде.
+//
+// Под mu только меняем состояние и забираем ресурсы; всё, что может
+// заблокироваться (разборка gVisor, закрытие сеанса), делается вне mu и с
+// ограничением по времени — иначе после долгого сеанса отключение зависало.
 func Stop() {
 	stopKS()
 	mu.Lock()
@@ -574,16 +581,21 @@ func Stop() {
 		cancel()
 		cancel = nil
 	}
-	stopVPNStack()
-	if socksLn != nil {
-		socksLn.Close()
-		socksLn = nil
-	}
-	if mx != nil {
-		mx.Conn().Close()
-		mx = nil
-	}
+	h := detachVPNStack()
+	ln := socksLn
+	socksLn = nil
+	m := mx
+	mx = nil
 	mu.Unlock()
+
+	// Сначала TUN: пока жив наш дубликат fd, Android держит VPN-интерфейс.
+	releaseVPNStack(h)
+	if ln != nil {
+		_ = ln.Close()
+	}
+	if m != nil {
+		closeBounded(func() { _ = m.Conn().Close() }, time.Second)
+	}
 
 	// Неблокирующее / ограниченное по времени ожидание активных горутин
 	done := make(chan struct{})
@@ -597,6 +609,20 @@ func Stop() {
 	}
 
 	logf("ядро остановлено")
+}
+
+// closeBounded выполняет f, но ждёт не дольше d (f доработает в фоне).
+func closeBounded(f func(), d time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = recover() }()
+		f()
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
 }
 
 // IsRunning — состояние для UI.

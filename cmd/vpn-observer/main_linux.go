@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"golang.org/x/sys/unix"
@@ -17,6 +18,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +34,11 @@ var captureDir = flag.String("captures", "/run/chameleon/captures", "header-only
 var enableFile = flag.String("capture-window", "/run/chameleon/capture-enabled-until", "root-controlled temporary capture window")
 var probe = flag.String("probe-host", "", "optional operator-approved HTTPS canary hostname; no user browsing domains")
 var maxBytes = flag.Int64("max-bytes", 96<<20, "metadata disk bound")
+var asnPath = flag.String("asn-db", "/var/lib/chameleon-observer/ip2asn-ru.tsv", "optional offline IP-to-ASN table (iptoasn TSV) for per-operator quality aggregates")
+var qualityWindow = flag.Duration("quality-window", 5*time.Minute, "aggregation window for per-operator connection quality")
+
+var asnDB *telemetry.ASNDB
+var quality = telemetry.NewQualityAggregator(time.Now().UTC())
 
 func htons(n uint16) uint16 { return n<<8 | n>>8 }
 func filterPorts(values []uint16) []unix.SockFilter {
@@ -80,7 +87,7 @@ func observe(ctx context.Context, iface string, allowed map[uint16]bool, values 
 	if e = unix.Bind(fd, &unix.SockaddrLinklayer{Protocol: htons(unix.ETH_P_ALL), Ifindex: n.Index}); e != nil {
 		return e
 	}
-	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_RCVBUF, 1<<20)
+	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_RCVBUF, 8<<20)
 	if e = unix.SetNonblock(fd, true); e != nil {
 		return e
 	}
@@ -88,7 +95,15 @@ func observe(ctx context.Context, iface string, allowed map[uint16]bool, values 
 	if e = unix.SetsockoptSockFprog(fd, unix.SOL_SOCKET, unix.SO_ATTACH_FILTER, &unix.SockFprog{Len: uint16(len(program)), Filter: &program[0]}); e != nil {
 		return e
 	}
-	tracker := telemetry.Tracker{Node: *node, Interface: iface, MTU: n.MTU, CaptureDir: *captureDir}
+	local := map[string]bool{}
+	if addrs, err := n.Addrs(); err == nil {
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok {
+				local[ipn.IP.String()] = true
+			}
+		}
+	}
+	tracker := telemetry.Tracker{Node: *node, Interface: iface, MTU: n.MTU, CaptureDir: *captureDir, ServerPorts: allowed, Local: local, Resolve: asnDB.Lookup, OnEnd: quality.Add}
 	buffer := make([]byte, 128)
 	lastSweep, lastStats := time.Now(), time.Now()
 	emit := func(events []telemetry.Event) error {
@@ -111,7 +126,7 @@ func observe(ctx context.Context, iface string, allowed map[uint16]bool, values 
 		now := time.Now().UTC()
 		tracker.CaptureEnabled = enabled()
 		if fds[0].Revents&unix.POLLIN != 0 {
-			for i := 0; i < 128; i++ {
+			for i := 0; i < 4096; i++ {
 				length, _, err := unix.Recvfrom(fd, buffer, unix.MSG_DONTWAIT)
 				if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
 					break
@@ -249,9 +264,12 @@ func main() {
 		log.Fatal("too many carrier ports")
 	}
 	store := &telemetry.Store{Dir: *directory, MaxBytes: *maxBytes, Retention: 72 * time.Hour}
+	asnDB = telemetry.OpenASN(*asnPath)
+	log.Printf("quality aggregates: window=%v, asn ranges=%d", *qualityWindow, asnDB.Len())
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go probeCanary(ctx, store, *probe)
+	go qualityLoop(ctx, store)
 	var wg sync.WaitGroup
 	errors := make(chan error, 8)
 	for _, name := range strings.Split(*interfaces, ",") {
@@ -273,5 +291,55 @@ func main() {
 	for err := range errors {
 		log.Printf("metadata sensor stopped: %v", err)
 		os.Exit(1)
+	}
+}
+
+// qualityLoop закрывает окна агрегатов качества: пишет по событию netquality
+// на группу (оператор/каскад × служба) и снимок за 24 ч в netquality.json.
+func qualityLoop(ctx context.Context, store *telemetry.Store) {
+	window := *qualityWindow
+	if window < time.Minute {
+		window = time.Minute
+	}
+	ticker := time.NewTicker(window)
+	defer ticker.Stop()
+	lastReload := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			now = now.UTC()
+			sums := quality.Flush(now)
+			for _, s := range sums {
+				if err := store.Append(telemetry.QualityEvent(*node, s)); err != nil {
+					log.Printf("quality event: %v", err)
+				}
+			}
+			writeQualitySnapshot(now, window, sums)
+			if time.Since(lastReload) > 10*time.Minute {
+				_ = asnDB.Reload()
+				lastReload = time.Now()
+			}
+		}
+	}
+}
+
+func writeQualitySnapshot(now time.Time, window time.Duration, last []telemetry.QualitySummary) {
+	body, err := json.MarshalIndent(map[string]any{
+		"generated":   now,
+		"node":        *node,
+		"window":      window.String(),
+		"asn_ranges":  asnDB.Len(),
+		"note":        "passive per-operator connection quality from VPN carrier headers; stalls = sender retransmits without ACK progress; last_24h medians are approximate",
+		"last_window": last,
+		"last_24h":    quality.Rolling(),
+	}, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := filepath.Join(*directory, ".netquality.json.tmp")
+	if err := os.WriteFile(tmp, body, 0600); err == nil {
+		_ = os.Rename(tmp, filepath.Join(*directory, "netquality.json"))
 	}
 }

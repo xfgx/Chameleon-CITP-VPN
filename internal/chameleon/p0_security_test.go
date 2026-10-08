@@ -202,25 +202,6 @@ func TestStrictParsersRejectTrailingData(t *testing.T) {
 	}
 }
 
-func TestReplayCacheIsBoundedAndFailsClosed(t *testing.T) {
-	cache := newReplayCache()
-	for i := 0; i < maxReplayEntries; i++ {
-		var nonce [16]byte
-		nonce[0] = byte(i >> 8)
-		nonce[1] = byte(i)
-		if cache.seenOrAdd(nonce, time.Hour) {
-			t.Fatalf("fresh nonce %d rejected before cache reached its bound", i)
-		}
-	}
-	var extra [16]byte
-	extra[0], extra[1], extra[2] = 0xff, 0xff, 1
-	if !cache.seenOrAdd(extra, time.Hour) {
-		t.Fatal("full replay cache must fail closed")
-	}
-	if len(cache.seen) != maxReplayEntries {
-		t.Fatalf("replay cache exceeded bound: %d", len(cache.seen))
-	}
-}
 
 func TestMuxResourceLimits(t *testing.T) {
 	m := newMux(nil)

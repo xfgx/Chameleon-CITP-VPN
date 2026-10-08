@@ -58,6 +58,8 @@ func adminMux() *http.ServeMux {
 	mux.HandleFunc("/api/logs", requireRole("operator", handleLogs))
 	mux.HandleFunc("/api/activations", requireRole("admin", handleActivations))
 	mux.HandleFunc("/api/flows", requireRole("operator", handleFlows))
+	mux.HandleFunc("/api/quality", requireRole("operator", handleQuality))
+	mux.HandleFunc("/api/changelog", requireRole("operator", handleChangelog))
 	mux.HandleFunc("/api/flows/stream", requireRole("operator", handleFlowStream))
 	mux.HandleFunc("/api/flows/capture", requireRole("admin", handleCapture))
 	mux.HandleFunc("/api/flows/capture-window", requireRole("admin", handleCaptureWindow))

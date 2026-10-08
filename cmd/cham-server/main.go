@@ -49,6 +49,9 @@ func main() {
 	hold := flag.Duration("blackhole", 45*time.Second, "сколько держать blackhole-соединение")
 	allowfile := flag.String("allowfile", "", "файл белого списка клиентов (base64-ключ на строку; пустой = принимать всех)")
 	maxConnections := flag.Int("max-connections", 1024, "максимум одновременных подключений")
+	maxPending := flag.Int("max-pending", 512, "максимум соединений до завершения рукопожатия (включая blackhole)")
+	maxPendingPerAddr := flag.Int("max-pending-per-ip", 16, "предел соединений до рукопожатия с одного IPv4 или IPv6 /64")
+	maxPendingPerNet := flag.Int("max-pending-per-net", 64, "предел соединений до рукопожатия с одной подсети /24 (IPv4) или /48 (IPv6)")
 	policyFile := flag.String("policy", "", "JSON-файл единой egress policy (пустой = безопасная policy по умолчанию)")
 	cfListen := flag.String("cf-listen", "", "Control Fabric HTTPS bulletin listen address (empty = disabled), e.g. 0.0.0.0:9444")
 	cfCARListen := flag.String("cf-car-listen", "", "Control Fabric CAR HTTP listen address (empty = disabled), e.g. 0.0.0.0:9445")
@@ -72,6 +75,9 @@ func main() {
 	flag.Parse()
 	if *maxConnections < 1 || *maxConnections > 65536 {
 		log.Fatal("-max-connections должен быть в диапазоне 1..65536")
+	}
+	if *maxPending < 1 || *maxPending > 65536 || *maxPendingPerAddr < 1 || *maxPendingPerNet < *maxPendingPerAddr {
+		log.Fatal("-max-pending: 1..65536; -max-pending-per-net не меньше -max-pending-per-ip (оба ≥1)")
 	}
 
 	if *genkey {
@@ -185,7 +191,9 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("cham-server v2: нода слушает %s (cbr=%v, blackhole=%v, max-connections=%d)", *listen, *cbr, *hold, *maxConnections)
-	connections := make(chan struct{}, *maxConnections)
+	gate := newConnGate(*maxConnections, *maxPending, *maxPendingPerAddr, *maxPendingPerNet)
+	go gate.reportLoop(5 * time.Minute)
+	log.Printf("допуск: до рукопожатия не более %d соединений, %d с адреса (/64 для IPv6), %d с подсети", *maxPending, *maxPendingPerAddr, *maxPendingPerNet)
 
 	// WS-фронт (CDN-фронтинг): воркер Cloudflare ретранслирует сюда клиентские
 	// потоки — для DPI клиент соединяется с IP CDN, нода в трафике не видна.
@@ -203,15 +211,17 @@ func main() {
 			if err != nil {
 				return // AcceptWS уже ответил 404
 			}
-			select {
-			case connections <- struct{}{}:
-				go func() {
-					defer func() { <-connections }()
-					handle(c, priv, allow, strikes, policyEngine, cf, chain, *cbr, *dialTimeout, *flavorName, *hold)
-				}()
-			default:
+			// За CDN адрес соединения — IP Cloudflare, общий для всех:
+			// пределы на адрес не применяем, действует общий предел ожидания.
+			ticket, ok := gate.admit("", "")
+			if !ok {
 				_ = c.Close()
+				return
 			}
+			go func() {
+				defer ticket.done()
+				handle(c, priv, allow, strikes, policyEngine, cf, chain, *cbr, *dialTimeout, *flavorName, *hold, ticket)
+			}()
 		})
 		go func() {
 			if err := http.ListenAndServe(*wsListen, muxWS); err != nil {
@@ -225,15 +235,16 @@ func main() {
 		if err != nil {
 			return
 		}
-		select {
-		case connections <- struct{}{}:
-			go func() {
-				defer func() { <-connections }()
-				handle(c, priv, allow, strikes, policyEngine, cf, chain, *cbr, *dialTimeout, *flavorName, *hold)
-			}()
-		default:
+		addr, nw := addrKeys(ipOf(c))
+		ticket, ok := gate.admit(addr, nw)
+		if !ok {
 			_ = c.Close()
+			continue
 		}
+		go func() {
+			defer ticket.done()
+			handle(c, priv, allow, strikes, policyEngine, cf, chain, *cbr, *dialTimeout, *flavorName, *hold, ticket)
+		}()
 	}
 }
 
@@ -367,17 +378,20 @@ func ipOf(c net.Conn) string {
 	return c.RemoteAddr().String()
 }
 
-func handle(c net.Conn, priv *ecdh.PrivateKey, allow *clientAccess, strikes *strikeList, policy *chameleon.PolicyEngine, cf *chameleon.ControlFabric, chain *chameleon.UpstreamChain, cbr, dialTimeout time.Duration, flavorName string, hold time.Duration) {
+func handle(c net.Conn, priv *ecdh.PrivateKey, allow *clientAccess, strikes *strikeList, policy *chameleon.PolicyEngine, cf *chameleon.ControlFabric, chain *chameleon.UpstreamChain, cbr, dialTimeout time.Duration, flavorName string, hold time.Duration, ticket *admitted) {
 	defer c.Close()
 	if tc, ok := c.(*net.TCPConn); ok {
 		tc.SetNoDelay(true)
 	}
 	ip := ipOf(c)
+	// Бан и счётчик провалов — по адресу (IPv6: по /64, иначе бан обходится
+	// сменой младших бит адреса). Для CDN-фронта это IP Cloudflare.
+	strikeKey, _ := addrKeys(ip)
 
 	// Серийный сканер: сразу в blackhole, криптографию даже не считаем.
-	if n := strikes.get(ip); n >= 5 {
-		log.Printf("blackhole: %s (забанен, провалов: %d)", ip, n)
-		chameleon.Blackhole(c, hold)
+	if n := strikes.get(strikeKey); n >= 5 {
+		authLog.printf("blackhole: %s (забанен, провалов: %d)", ip, n)
+		chameleon.Blackhole(c, ticket.holdFor(hold))
 		return
 	}
 
@@ -385,11 +399,16 @@ func handle(c net.Conn, priv *ecdh.PrivateKey, allow *clientAccess, strikes *str
 	if err != nil {
 		if err == chameleon.ErrAuth {
 			// Зонд, мусор, replay или чужое устройство: молчим, ни байта ответа.
-			if n := strikes.hit(ip); n >= 3 {
-				log.Printf("blackhole: %s (провалов аутентификации: %d)", ip, n)
+			if n := strikes.hit(strikeKey); n >= 3 {
+				authLog.printf("blackhole: %s (провалов аутентификации: %d)", ip, n)
 			}
-			chameleon.Blackhole(c, hold)
+			chameleon.Blackhole(c, ticket.holdFor(hold))
 		}
+		return
+	}
+	// Только теперь соединение занимает слот сеанса.
+	if !ticket.promote() {
+		authLog.printf("сеанс отклонён: %s (заняты все слоты сеансов, -max-connections)", ip)
 		return
 	}
 	if !allow.register(c, clientPub) { return }

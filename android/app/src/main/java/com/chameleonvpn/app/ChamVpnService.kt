@@ -72,12 +72,13 @@ class ChamVpnService:VpnService(){
    require(profiles.isNotEmpty()){ "Для выбранного протокола нет профиля. Обновите доступ или выберите другой протокол." }
    require(vault.entitlementExpiry()>System.currentTimeMillis()/1000){ "Срок ключа истёк. Откройте новый QR." }
    val privateKey=vault.clientKey{Mobilecore.genClientKey()}
+   val ruDirect=vault.ruDirect()
    val protector=object:Protector{override fun protect(fd:Int)=this@ChamVpnService.protect(fd)}
    var connected=false
    for(profile in profiles){
     if(!current(epoch))return
     val inner=if(profile.mode=="ks")profile.inner else "10.66.0.2"
-    val established=Builder().setSession("Chameleon VPN").setMtu(1300).addAddress(inner,24).addDnsServer("8.8.8.8").allowFamily(OsConstants.AF_INET).addRoute("0.0.0.0",0).setBlocking(true).establish()?:error("Разрешение VPN не выдано")
+    val established=establishTun(inner,ruDirect)
     // IPv6 is intentionally blocked by VpnService; no allowFamily(AF_INET6).
     synchronized(lock){if(!current(epoch)){established.close();return};tun=established;own=established}
     val fd=ParcelFileDescriptor.dup(established.fileDescriptor).detachFd()
@@ -88,7 +89,7 @@ class ChamVpnService:VpnService(){
     var ready=error.isEmpty()
     if(ready&&profile.mode=="ks"){val deadline=System.currentTimeMillis()+15000;while(current(epoch)&&Mobilecore.lastRxSec()<0&&System.currentTimeMillis()<deadline)Thread.sleep(100);ready=Mobilecore.lastRxSec()>=0}
     if(!current(epoch))return
-    if(ready){connected=true;lifecycle=VpnLifecycleState.RUNNING;notify("Подключено · "+profile.mode.uppercase());break}
+    if(ready){connected=true;lifecycle=VpnLifecycleState.RUNNING;notify("Подключено · "+profile.mode.uppercase()+if(ruDirect)" · РФ напрямую" else "");break}
     Mobilecore.stop();coreStarted=false
     synchronized(lock){if(tun===established)tun=null};established.close();own=null
     AppLog.d("VPN","profile startup failed: "+profile.mode)
@@ -112,6 +113,20 @@ class ChamVpnService:VpnService(){
   }
  }
 
+ private fun tunBuilder(inner:String)=Builder().setSession("Chameleon VPN").setMtu(1300).addAddress(inner,24).addDnsServer("8.8.8.8").allowFamily(OsConstants.AF_INET).setBlocking(true)
+ /**
+  * RU-direct is best effort: if the platform rejects the split route set
+  * (e.g. an OEM Binder limit) the session falls back to the full tunnel instead
+  * of failing, which is always the safe direction.
+  */
+ private fun establishTun(inner:String,ruDirect:Boolean):ParcelFileDescriptor{
+  if(ruDirect){
+   val attempt=runCatching{val builder=tunBuilder(inner);val routes=RuDirect.addRoutes(this,builder);AppLog.d("VPN","ru-direct "+routes);builder.establish()}
+   if(attempt.isSuccess)return attempt.getOrNull()?:error("Разрешение VPN не выдано")
+   AppLog.e("VPN","ru-direct routes rejected, using full tunnel: "+attempt.exceptionOrNull()?.javaClass?.simpleName)
+  }
+  return tunBuilder(inner).addRoute("0.0.0.0",0).establish()?:error("Разрешение VPN не выдано")
+ }
  private fun fail(message:String){lastError=message;AppLog.e("VPN",message);stopVpn()}
 
  private fun stopVpn(){
@@ -120,14 +135,19 @@ class ChamVpnService:VpnService(){
   lifecycle=VpnLifecycleState.STOPPING
   workerThread?.interrupt()
   Thread({
-   // Order matters: the core must release its duplicate TUN fd, otherwise Android keeps
-   // the VPN interface up. We do not wait for the worker (dial/sleep) before releasing it.
-   try{Mobilecore.stop()}catch(_:Throwable){}
+   // Our own TUN descriptor goes first: it never depends on the core. The core's
+   // duplicate fd is released by Mobilecore.stop(), which is bounded here — after a
+   // long CITP session the old core could hang in gVisor teardown and the button did
+   // nothing. The service is stopped regardless of how long the core takes.
    synchronized(lock){try{tun?.close()}catch(_:Throwable){};tun=null}
-   AppLog.i("VPN","туннель отпущен")
+   val core=Thread({try{Mobilecore.stop()}catch(_:Throwable){}},"chameleon-core-stop")
+   core.isDaemon=true
+   core.start()
+   try{core.join(4000)}catch(_:InterruptedException){}
+   AppLog.i("VPN",if(core.isAlive)"туннель отпущен; ядро завершается в фоне" else "туннель отпущен")
    if(generation.get()==epoch){
     try{if(Build.VERSION.SDK_INT>=24)stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION")stopForeground(true)}catch(_:Throwable){}
-    getSystemService(NotificationManager::class.java).cancel(NOTIFICATION)
+    try{getSystemService(NotificationManager::class.java).cancel(NOTIFICATION)}catch(_:Throwable){}
     lifecycle=if(lastError.isEmpty())VpnLifecycleState.STOPPED else VpnLifecycleState.FAILED
     stopSelf()
    }

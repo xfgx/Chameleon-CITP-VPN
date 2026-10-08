@@ -56,17 +56,21 @@ internal static class Vault {
  }
  static string Prefs=>Path.Combine(Folder,"preferences.json");
  static Dictionary<string,JsonElement> ReadPrefs(){try{if(new FileInfo(Prefs).Length>8192)return new();using var d=JsonDocument.Parse(File.ReadAllText(Prefs));var m=new Dictionary<string,JsonElement>(StringComparer.OrdinalIgnoreCase);foreach(var p in d.RootElement.EnumerateObject())m[p.Name]=p.Value.Clone();return m;}catch{return new();}}
- static void WritePrefs(string? protocol=null,bool? consent=null){
+ static void WritePrefs(string? protocol=null,bool? consent=null,bool? ruDirect=null){
   var m=ReadPrefs();string current=protocol??(m.TryGetValue("Protocol",out var v)&&v.ValueKind==JsonValueKind.String?v.GetString()??"auto":"auto");
   bool agreed=consent??(m.TryGetValue("SystemConsent",out var c)&&c.ValueKind==JsonValueKind.True);
+  bool direct=ruDirect??!(m.TryGetValue("RuDirect",out var r)&&r.ValueKind==JsonValueKind.False);
   Directory.CreateDirectory(Folder);string temp=Prefs+"."+Guid.NewGuid().ToString("N")+".tmp";
-  try{File.WriteAllText(temp,JsonSerializer.Serialize(new {Protocol=current,SystemConsent=agreed}));File.Move(temp,Prefs,true);}finally{if(File.Exists(temp))File.Delete(temp);}
+  try{File.WriteAllText(temp,JsonSerializer.Serialize(new {Protocol=current,SystemConsent=agreed,RuDirect=direct}));File.Move(temp,Prefs,true);}finally{if(File.Exists(temp))File.Delete(temp);}
  }
  // No saved choice means AUTO. Explicit CITP/KS choices from 4.3/4.4 are kept.
  internal static string Protocol(){var m=ReadPrefs();if(m.TryGetValue("Protocol",out var v)&&v.ValueKind==JsonValueKind.String){var s=v.GetString();if(s is "citp" or "ks" or "auto")return s;}return "auto";}
  internal static void Protocol(string value){if(value is not ("citp" or "ks" or "auto"))throw new ArgumentException();WritePrefs(protocol:value);}
  internal static bool SystemConsent(){var m=ReadPrefs();return m.TryGetValue("SystemConsent",out var v)&&v.ValueKind==JsonValueKind.True;}
  internal static void SystemConsent(bool value)=>WritePrefs(consent:value);
+ // "Российские сайты напрямую" (docs/RU-DIRECT.md). On unless the user switched it off.
+ internal static bool RuDirect(){var m=ReadPrefs();return !(m.TryGetValue("RuDirect",out var v)&&v.ValueKind==JsonValueKind.False);}
+ internal static void RuDirect(bool value)=>WritePrefs(ruDirect:value);
 }
 internal sealed record PrepResult(bool Ok,string Code,string Detail,string Summary);
 // Starts only fixed, required Windows services. Never disables security features or touches other programs.
@@ -107,13 +111,13 @@ internal static class SystemPrep {
 }
 internal static class BrokerClient {
  static readonly JsonSerializerOptions Strict=new(){UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow};
- internal static async Task<Reply> Call(string command,string protocol,Credentials? credentials=null,CancellationToken shutdown=default) {
+ internal static async Task<Reply> Call(string command,string protocol,Credentials? credentials=null,CancellationToken shutdown=default,bool? ruDirect=null) {
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(shutdown);deadline.CancelAfter(command=="connect"?TimeSpan.FromSeconds(protocol=="auto"?150:85):TimeSpan.FromSeconds(10));var ct=deadline.Token;
   using var pipe=new NamedPipeClientStream(".","ChameleonFreeVPN.v1",PipeDirection.InOut,PipeOptions.Asynchronous,TokenImpersonationLevel.Identification);
   string stage="open";
   try {
    await pipe.ConnectAsync(4000,ct);stage="server_identity";Verify(pipe.SafePipeHandle);
-   stage="send";byte[] body=JsonSerializer.SerializeToUtf8Bytes(new {version=1,command,protocol,credentials},new JsonSerializerOptions {DefaultIgnoreCondition=JsonIgnoreCondition.WhenWritingNull});
+   stage="send";byte[] body=JsonSerializer.SerializeToUtf8Bytes(new {version=1,command,protocol,credentials,ru_direct=ruDirect},new JsonSerializerOptions {DefaultIgnoreCondition=JsonIgnoreCondition.WhenWritingNull});
    if(body.Length>16384)throw new SafeFailure("ipc.frame","Недопустимый размер запроса.");
    try {byte[] length=new byte[4];BinaryPrimitives.WriteUInt32LittleEndian(length,(uint)body.Length);await pipe.WriteAsync(length,ct);await pipe.WriteAsync(body,ct);await pipe.FlushAsync(ct);}finally{CryptographicOperations.ZeroMemory(body);}
    stage="receive";byte[] header=new byte[4];await pipe.ReadExactlyAsync(header,ct);uint size=BinaryPrimitives.ReadUInt32LittleEndian(header);if(size<2||size>16384)throw new SafeFailure("ipc.frame","Служба вернула некорректный размер ответа.");

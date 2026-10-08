@@ -12,11 +12,12 @@ public partial class MainWindow : Window {
  Credentials? credentials; string protocol="auto";Reply reply=new(){State="disconnected"};bool busy,operation,brokerReady,exiting,trayHintShown;string code="",detail="",system="";DateTime checkedAt;
  UpdateInfo? update;bool updating;DateTime updateCheckedAt;
  Forms.NotifyIcon? tray;Forms.ToolStripMenuItem? trayToggle;
- public MainWindow(){InitializeComponent();VersionText.Text=AppInfo.Version+" "+AppInfo.Channel;Page(App.Updated?"Updates":"Home");FitToScreen();UpdateUi();}
+ public MainWindow(){InitializeComponent();VersionText.Text=AppInfo.Version+" "+AppInfo.Channel;Page(App.Updated?"Updates":"Home");FitToScreen();UpdateUi();IsVisibleChanged+=(_,_)=>Ambient();StateChanged+=(_,_)=>Ambient();}
  void FitToScreen(){var area=SystemParameters.WorkArea;if(Height>area.Height-8)Height=Math.Max(420,area.Height-8);if(Width>area.Width-8)Width=Math.Max(600,area.Width-8);}
  async void LoadedWindow(object sender,RoutedEventArgs e){
+  MoveIndicator(false);HookCards();Intro();
   CreateTray();Updater.Cleanup();_=CheckForUpdates();
-  try{credentials=Vault.Load();protocol=Vault.Protocol();if(!string.IsNullOrEmpty(App.Activation)){credentials=credentials with{Token=Vault.ParseToken(App.Activation)};Vault.Save(credentials);App.Activation=null;Page("Access");AccessNotice.Text="Ключ сохранён. Можно подключаться.";}}
+  try{credentials=Vault.Load();protocol=Vault.Protocol();if(!string.IsNullOrEmpty(App.Activation)){credentials=credentials with{Token=Vault.ParseToken(App.Activation)};Vault.Save(credentials);App.Activation=null;Page("Access");Motion.SetText(AccessNotice,"Ключ сохранён. Можно подключаться.");}}
   catch{code="vault.read";detail="Не удалось прочитать ключ для текущего пользователя Windows. Хранилище сохранено без изменений.";}
   Update();
   // Ask once for every system change the VPN needs, then repair services we are allowed to start.
@@ -74,103 +75,115 @@ public partial class MainWindow : Window {
   exiting=true;Close();System.Windows.Application.Current.Shutdown();
  }
  void ClosedWindow(object? sender,EventArgs e){timer.Stop();shutdown.Cancel();shutdown.Dispose();if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}}
- void Page(string name){foreach(var p in new[]{Home,Access,Protocol,Diagnostics,Updates})p.Visibility=p.Name==name?Visibility.Visible:Visibility.Collapsed;if(name=="Updates"&&IsLoaded&&!updating&&DateTime.Now-updateCheckedAt>TimeSpan.FromMinutes(5))_=CheckForUpdates();foreach(var b in new[]{NavHome,NavAccess,NavProtocol,NavDiagnostics,NavUpdates})b.Background=(string)b.Tag==name?new SolidColorBrush(Color.FromRgb(34,60,83)):Brushes.Transparent;}
+ void Page(string name){ShowPage(name);if(name=="Updates"&&IsLoaded&&!updating&&DateTime.Now-updateCheckedAt>TimeSpan.FromMinutes(5))_=CheckForUpdates();}
  void Navigate(object sender,RoutedEventArgs e)=>Page((string)((Button)sender).Tag);
  void OpenAccess(object sender,RoutedEventArgs e)=>Page("Access");
  async Task Refresh()=>await Exchange("status");
  async Task Exchange(string command){
   if(busy)return;busy=true;operation=command!="status";if(operation)Update();
-  try {reply=await BrokerClient.Call(command,protocol,command=="connect"?credentials:null,shutdown.Token);brokerReady=true;code=reply.Code??"";detail=reply.Message;}
+  try {reply=await BrokerClient.Call(command,protocol,command=="connect"?credentials:null,shutdown.Token,command=="connect"?Vault.RuDirect():null);brokerReady=true;code=reply.Code??"";detail=reply.Message;}
   catch(SafeFailure f){brokerReady=false;reply=new(){State="error"};code=f.Code;detail=f.Message;}
   catch{brokerReady=false;reply=new(){State="error"};code="ipc.internal";detail="Не удалось завершить безопасный обмен со службой.";}
   finally{busy=false;operation=false;checkedAt=DateTime.Now;Update();}
  }
  async void Connect(object sender,RoutedEventArgs e)=>await ToggleConnection();
  async Task ToggleConnection(){
-  if(busy)return;if(credentials==null){Page("Diagnostics");return;}if(credentials.Token.Length==0){Page("Access");return;}
+  if(busy||preparing)return;if(credentials==null){Page("Diagnostics");return;}if(credentials.Token.Length==0){Page("Access");return;}
   bool disconnect=reply.State is "connected" or "reconnecting";
   if(!disconnect){
    if(!Vault.SystemConsent()&&!RequestSystemConsent())return;
-   await Prepare();if(!brokerReady&&code.StartsWith("system.",StringComparison.Ordinal))return;
+   // Respond at once: the service check below can take a few seconds on a cold start.
+   preparing=true;Motion.SetText(StatusTitle,"Устанавливаем соединение");Motion.SetText(StatusDetail,"Проверяем службы Windows…");Update();
+   try{await Prepare();}finally{preparing=false;}
+   if(!brokerReady&&code.StartsWith("system.",StringComparison.Ordinal)){Update();return;}
   }
-  StatusTitle.Text=disconnect?"Отключаем VPN":"Устанавливаем соединение";StatusDetail.Text=disconnect?"Снимаем маршруты и защитные правила…":protocol=="auto"?"AUTO: проверяем KS и CITP…":"Проверяем доступ и защиту соединения…";
+  // A background status refresh may still be in flight: wait for it instead of dropping the command.
+  for(int i=0;i<40&&busy;i++)await Task.Delay(100);
+  Motion.SetText(StatusTitle,disconnect?"Отключаем VPN":"Устанавливаем соединение");Motion.SetText(StatusDetail,disconnect?"Снимаем маршруты и защитные правила…":protocol=="auto"?"AUTO: проверяем KS и CITP…":"Проверяем доступ и защиту соединения…");
   await Exchange(disconnect?"disconnect":"connect");
  }
- async void Check(object sender,RoutedEventArgs e){await Prepare();await Refresh();}
+ async void Check(object sender,RoutedEventArgs e){Motion.SetText(DiagnosticTitle,"Проверяем службу и компоненты…");await Prepare();await Refresh();}
  void SaveKey(object sender,RoutedEventArgs e){
-  if(busy||reply.State is "connected" or "reconnecting"){AccessNotice.Text="Сначала отключите VPN.";return;}
-  try{if(credentials==null)throw new InvalidOperationException();var changed=credentials with{Token=Vault.ParseToken(KeyInput.Password)};Vault.Save(changed);credentials=changed;KeyInput.Clear();AccessNotice.Text="Ключ сохранён. Откройте «Подключение» и нажмите «Подключить VPN».";Update();}
-  catch(FormatException){AccessNotice.Text="Вставьте полный подписанный ключ или QR-ссылку из официального бота.";}
-  catch{AccessNotice.Text="Не удалось сохранить ключ. Предыдущее хранилище не сбрасывалось.";}
+  if(busy||reply.State is "connected" or "reconnecting"){Motion.SetText(AccessNotice,"Сначала отключите VPN.",flash:true);return;}
+  try{if(credentials==null)throw new InvalidOperationException();var changed=credentials with{Token=Vault.ParseToken(KeyInput.Password)};Vault.Save(changed);credentials=changed;KeyInput.Clear();Motion.SetText(AccessNotice,"Ключ сохранён. Откройте «Подключение» и нажмите «Подключить VPN».",flash:true);Update();}
+  catch(FormatException){Motion.SetText(AccessNotice,"Вставьте полный подписанный ключ или QR-ссылку из официального бота.",flash:true);}
+  catch{Motion.SetText(AccessNotice,"Не удалось сохранить ключ. Предыдущее хранилище не сбрасывалось.",flash:true);}
+ }
+ void ToggleRuDirect(object sender,RoutedEventArgs e){
+  if(busy||reply.State is "connected" or "reconnecting"){Motion.SetText(ProtocolNotice,"Сначала отключите VPN.",flash:true);return;}
+  try{bool next=!Vault.RuDirect();Vault.RuDirect(next);Motion.SetText(ProtocolNotice,next?"Российские сайты пойдут напрямую со следующего подключения.":"Весь трафик пойдёт через VPN со следующего подключения.",flash:true);Update();}catch{Motion.SetText(ProtocolNotice,"Не удалось сохранить настройку.",flash:true);}
  }
  void ChooseProtocol(object sender,RoutedEventArgs e){
-  if(busy||reply.State is "connected" or "reconnecting"){ProtocolNotice.Text="Сначала отключите VPN.";return;}
-  try{string choice=(string)((Button)sender).Tag;Vault.Protocol(choice);protocol=choice;ProtocolNotice.Text="Выбор сохранён. Применится при подключении.";Update();}catch{ProtocolNotice.Text="Не удалось сохранить выбор протокола.";}
+  if(busy||reply.State is "connected" or "reconnecting"){Motion.SetText(ProtocolNotice,"Сначала отключите VPN.",flash:true);return;}
+  try{string choice=(string)((Button)sender).Tag;Vault.Protocol(choice);protocol=choice;Motion.SetText(ProtocolNotice,"Выбор сохранён. Применится при подключении.",flash:true);Update();}catch{Motion.SetText(ProtocolNotice,"Не удалось сохранить выбор протокола.",flash:true);}
  }
  static void Open(string url){try{Process.Start(new ProcessStartInfo(url){UseShellExecute=true});}catch{}}
  void OpenBot(object sender,RoutedEventArgs e)=>Open("https://t.me/your_activation_bot");
- void CopyReport(object sender,RoutedEventArgs e){try{Clipboard.SetText($"Chameleon {AppInfo.Version} {AppInfo.Channel} / WPF (admin)\nWindows IPC diagnostics\nBrokerReady: {brokerReady.ToString().ToLowerInvariant()}\nState: {reply.State}\nProtocol: {protocol.ToUpperInvariant()}{(reply.Mode!=null?" / "+reply.Mode:"")}\nSystem: {system}\nChecked: {checkedAt:HH:mm:ss}\nCode: {(code.Length==0?"ok":code)}\nDetail: {detail}\nCredentials/tokens/traffic: not included");CopyNotice.Text="Отчёт скопирован.";}catch{CopyNotice.Text="Буфер обмена занят. Повторите.";}}
+ void CopyReport(object sender,RoutedEventArgs e){try{Clipboard.SetText($"Chameleon {AppInfo.Version} {AppInfo.Channel} / WPF (admin)\nWindows IPC diagnostics\nBrokerReady: {brokerReady.ToString().ToLowerInvariant()}\nState: {reply.State}\nProtocol: {protocol.ToUpperInvariant()}{(reply.Mode!=null?" / "+reply.Mode:"")}\nSystem: {system}\nChecked: {checkedAt:HH:mm:ss}\nCode: {(code.Length==0?"ok":code)}\nDetail: {detail}\nCredentials/tokens/traffic: not included");Motion.SetText(CopyNotice,"Отчёт скопирован.",flash:true);}catch{Motion.SetText(CopyNotice,"Буфер обмена занят. Повторите.",flash:true);}}
  void CheckUpdates(object sender,RoutedEventArgs e){if(!updating)_=CheckForUpdates();}
  async Task CheckForUpdates(){
-  if(updating)return;updating=true;UpdateTitle.Text="Проверяем обновления";UpdateDetail.Text="Связываемся с сайтом Chameleon…";UpdateUi();
+  if(updating)return;updating=true;Motion.SetText(UpdateTitle,"Проверяем обновления");Motion.SetText(UpdateDetail,"Связываемся с сайтом Chameleon…");UpdateUi();
   try{
    var u=await Updater.Check(shutdown.Token);
    if(Updater.Newer(u.Version)){
-    update=u;UpdateTitle.Text="Доступна версия "+u.Version;
-    UpdateDetail.Text=Updater.Installed?"Размер "+Bytes((ulong)u.Size)+". Нажмите «Обновить»: установщик скачается, будет проверен и запустится автоматически.":"Эта копия запущена не из Program Files. Скачайте установщик с сайта и установите его.";
-   }else{update=null;UpdateTitle.Text="Установлена последняя версия";UpdateDetail.Text=App.Updated?"Обновление установлено. Chameleon "+AppInfo.Version+" готов к работе.":"На сайте версия "+u.Version+". Обновление не требуется.";}
+    update=u;Motion.SetText(UpdateTitle,"Доступна версия "+u.Version);
+    Motion.SetText(UpdateDetail,Updater.Installed?"Размер "+Bytes((ulong)u.Size)+". Нажмите «Обновить»: установщик скачается, будет проверен и запустится автоматически.":"Эта копия запущена не из Program Files. Скачайте установщик с сайта и установите его.");
+   }else{update=null;Motion.SetText(UpdateTitle,"Установлена последняя версия");Motion.SetText(UpdateDetail,App.Updated?"Обновление установлено. Chameleon "+AppInfo.Version+" готов к работе.":"На сайте версия "+u.Version+". Обновление не требуется.");}
   }
-  catch(SafeFailure f){UpdateTitle.Text="Не удалось проверить обновления";UpdateDetail.Text=f.Message;}
+  catch(SafeFailure f){Motion.SetText(UpdateTitle,"Не удалось проверить обновления");Motion.SetText(UpdateDetail,f.Message);}
   catch(OperationCanceledException){}
-  catch{UpdateTitle.Text="Не удалось проверить обновления";UpdateDetail.Text="Нет связи с сайтом обновлений. Проверьте интернет и повторите.";}
+  catch{Motion.SetText(UpdateTitle,"Не удалось проверить обновления");Motion.SetText(UpdateDetail,"Нет связи с сайтом обновлений. Проверьте интернет и повторите.");}
   finally{updating=false;updateCheckedAt=DateTime.Now;UpdateUi();}
  }
  async void InstallUpdate(object sender,RoutedEventArgs e){
   if(update==null||updating||exiting)return;var u=update;
   if((reply.State is "connected" or "reconnecting" or "connecting")&&MessageBox.Show(this,"Для установки обновления VPN будет отключён. Продолжить?","Chameleon VPN",MessageBoxButton.YesNo,MessageBoxImage.Question,MessageBoxResult.Yes)!=MessageBoxResult.Yes)return;
-  updating=true;UpdateUi();UpdateProgress.Value=0;UpdateProgress.Visibility=Visibility.Visible;UpdateTitle.Text="Скачиваем версию "+u.Version;UpdateDetail.Text="Загрузка начинается…";
+  updating=true;UpdateUi();Motion.ResetProgress(UpdateProgress);UpdateProgress.Visibility=Visibility.Visible;Motion.FadeIn(UpdateProgress);Motion.SetText(UpdateTitle,"Скачиваем версию "+u.Version);Motion.SetText(UpdateDetail,"Загрузка начинается…");
   try{
-   var progress=new Progress<double>(v=>{UpdateProgress.Value=v;UpdateDetail.Text="Загружено "+Bytes((ulong)(v*u.Size))+" из "+Bytes((ulong)u.Size)+".";});
-   string path=await Updater.Download(u,progress,shutdown.Token);
+   bool downloading=true;
+   var progress=new Progress<double>(v=>{if(!downloading)return;Motion.Advance(UpdateProgress,v);Motion.SetText(UpdateDetail,"Загружено "+Bytes((ulong)(v*u.Size))+" из "+Bytes((ulong)u.Size)+".",animate:false);});
+   string path=await Updater.Download(u,progress,shutdown.Token);downloading=false;
    for(int i=0;i<150&&busy;i++)await Task.Delay(100);
    if(reply.State is "connected" or "reconnecting" or "connecting"){
-    UpdateTitle.Text="Отключаем VPN";UpdateDetail.Text="Снимаем маршруты и защитные правила перед установкой…";
+    Motion.SetText(UpdateTitle,"Отключаем VPN");Motion.SetText(UpdateDetail,"Снимаем маршруты и защитные правила перед установкой…");
     await Exchange("disconnect");
     if(reply.State is "connected" or "reconnecting")throw new SafeFailure("update.disconnect","Не удалось отключить VPN. Отключите его вручную и повторите обновление.");
    }
-   UpdateTitle.Text="Проверяем установщик";UpdateDetail.Text="Сверяем размер, SHA-256 и версию…";
+   Motion.SetText(UpdateTitle,"Проверяем установщик");Motion.SetText(UpdateDetail,"Сверяем размер, SHA-256 и версию…");
    await Task.Run(()=>Updater.Launch(u,path));
-   UpdateTitle.Text="Устанавливаем обновление";UpdateDetail.Text="Приложение закроется и откроется снова через несколько секунд.";
+   Motion.SetText(UpdateTitle,"Устанавливаем обновление");Motion.SetText(UpdateDetail,"Приложение закроется и откроется снова через несколько секунд.");
    await Task.Delay(700);
    exiting=true;Close();System.Windows.Application.Current.Shutdown();
   }
-  catch(SafeFailure f){UpdateTitle.Text="Обновление не установлено";UpdateDetail.Text=f.Message;}
+  catch(SafeFailure f){Motion.SetText(UpdateTitle,"Обновление не установлено");Motion.SetText(UpdateDetail,f.Message);}
   catch(OperationCanceledException){}
-  catch{UpdateTitle.Text="Обновление не установлено";UpdateDetail.Text="Не удалось подготовить обновление. Повторите попытку.";}
+  catch{Motion.SetText(UpdateTitle,"Обновление не установлено");Motion.SetText(UpdateDetail,"Не удалось подготовить обновление. Повторите попытку.");}
   finally{if(!exiting){updating=false;UpdateProgress.Visibility=Visibility.Hidden;UpdateUi();}}
  }
  void UpdateUi(){
   CheckUpdateButton.IsEnabled=!updating;UpdateButton.IsEnabled=!updating&&update!=null&&Updater.Installed;
-  UpdateButton.Content=update!=null?"Обновить до "+update.Version:"Обновить";NavUpdates.Content=update!=null?"Обновления  •":"Обновления";
-  InstalledVersion.Text="Установлена версия "+AppInfo.Version+" "+AppInfo.Channel+(updateCheckedAt==default?"":" · проверено в "+updateCheckedAt.ToString("HH:mm"));
+  Motion.SetContent(UpdateButton,update!=null?"Обновить до "+update.Version:"Обновить");if(Motion.SetContent(NavUpdates,update!=null?"Обновления  •":"Обновления")&&update!=null)Motion.Pulse(NavUpdates,0.94);
+  Motion.SetText(InstalledVersion,"Установлена версия "+AppInfo.Version+" "+AppInfo.Channel+(updateCheckedAt==default?"":" · проверено в "+updateCheckedAt.ToString("HH:mm")));
  }
  static string Bytes(ulong n)=>n>=1073741824?(n/1073741824d).ToString("0.00",CultureInfo.CurrentCulture)+" ГиБ":n>=1048576?(n/1048576d).ToString("0.0",CultureInfo.CurrentCulture)+" МиБ":n>=1024?(n/1024d).ToString("0.0",CultureInfo.CurrentCulture)+" КиБ":n+" Б";
  static string Label(string p)=>p=="auto"?"AUTO":p.ToUpperInvariant();
  void Update(){
-  bool active=reply.State is "connected" or "reconnecting";bool hasKey=credentials?.Token.Length>0;
-  SaveButton.IsEnabled=!operation&&!active&&credentials!=null;ChooseAuto.IsEnabled=ChooseCitp.IsEnabled=ChooseKs.IsEnabled=!operation&&!active;CheckButton.IsEnabled=ConnectButton.IsEnabled=!operation;
-  Progress.Visibility=operation?Visibility.Visible:Visibility.Collapsed;
-  SelectedProtocol.Text=reply.State=="connected"&&reply.Mode!=null?reply.Mode:Label(protocol);Uploaded.Text=Bytes(reply.Up);Downloaded.Text=Bytes(reply.Down);
-  KeyStatus.Text=hasKey?"Сохранён · проверяется при подключении":"Ключ пока не добавлен";
-  foreach(var (button,tag) in new[]{(ChooseAuto,"auto"),(ChooseCitp,"citp"),(ChooseKs,"ks")}){button.Content=(protocol==tag?"Выбран ":"Выбрать ")+Label(tag);button.Background=protocol==tag?new SolidColorBrush(Color.FromRgb(34,109,181)):new SolidColorBrush(Color.FromRgb(37,53,74));}
-  if(!busy){
-   StatusTitle.Text=reply.State=="connected"?"Соединение защищено":reply.State=="reconnecting"?"Восстанавливаем соединение":reply.State=="connecting"?"Устанавливаем соединение":code.Length>0?"Требуется проверка":!hasKey?"Добавьте персональный ключ":"Готов к подключению";
-   StatusDetail.Text=code.Length>0?detail:reply.State=="connected"?"VPN подключён · "+(reply.Mode??Label(protocol)):reply.State is "reconnecting" or "connecting"?(detail.Length>0?detail:"Туннель временно недоступен. Защитные правила сохранены."):!hasKey?"Получите ключ в боте и сохраните его в разделе «Мой доступ».":"Выбран "+Label(protocol)+". Ваш трафик пока не защищён VPN.";
+  bool active=reply.State is "connected" or "reconnecting";bool hasKey=credentials?.Token.Length>0;bool working=operation||preparing;
+  SaveButton.IsEnabled=!working&&!active&&credentials!=null;ChooseAuto.IsEnabled=ChooseCitp.IsEnabled=ChooseKs.IsEnabled=RuDirectToggle.IsEnabled=!working&&!active;CheckButton.IsEnabled=ConnectButton.IsEnabled=!working;
+  // The indeterminate bar animates only while its slot is open (no hidden CPU use).
+  if(Motion.Reveal(ProgressSlot,15,working)){if(working)Progress.IsIndeterminate=true;else Motion.After(260,()=>{if(!operation&&!preparing)Progress.IsIndeterminate=false;});}
+  Motion.SetText(SelectedProtocol,reply.State=="connected"&&reply.Mode!=null?reply.Mode:Label(protocol));Uploaded.Text=Bytes(reply.Up);Downloaded.Text=Bytes(reply.Down);
+  Motion.SetText(KeyStatus,hasKey?"Сохранён · проверяется при подключении":"Ключ пока не добавлен");
+  bool direct=Vault.RuDirect();Motion.SetContent(RuDirectToggle,direct?"Включено":"Выключено");Motion.Paint(RuDirectToggle,Control.BackgroundProperty,direct?Color.FromRgb(34,109,181):Color.FromRgb(37,53,74));
+  foreach(var (button,tag) in new[]{(ChooseAuto,"auto"),(ChooseCitp,"citp"),(ChooseKs,"ks")}){Motion.SetContent(button,(protocol==tag?"Выбран ":"Выбрать ")+Label(tag));Motion.Paint(button,Control.BackgroundProperty,protocol==tag?Color.FromRgb(34,109,181):Color.FromRgb(37,53,74));}
+  if(!busy&&!preparing){
+   Motion.SetText(StatusTitle,reply.State=="connected"?"Соединение защищено":reply.State=="reconnecting"?"Восстанавливаем соединение":reply.State=="connecting"?"Устанавливаем соединение":code.Length>0?"Требуется проверка":!hasKey?"Добавьте персональный ключ":"Готов к подключению");
+   Motion.SetText(StatusDetail,code.Length>0?detail:reply.State=="connected"?"VPN подключён · "+(reply.Mode??Label(protocol)):reply.State is "reconnecting" or "connecting"?(detail.Length>0?detail:"Туннель временно недоступен. Защитные правила сохранены."):!hasKey?"Получите ключ в боте и сохраните его в разделе «Мой доступ».":"Выбран "+Label(protocol)+". Ваш трафик пока не защищён VPN.");
   }
-  PowerIcon.Stroke=new SolidColorBrush((Color)ColorConverter.ConvertFromString(reply.State=="connected"?"#7CDEC9":code.Length>0?"#FFA89D":"#8FC6FF"));
-  ConnectButton.Content=operation?"Пожалуйста, подождите…":active?"Отключить VPN":!hasKey?"Активировать доступ":"Подключить VPN";
-  DiagnosticTitle.Text=brokerReady?code.Length==0?"Служба отвечает":"Служба отвечает · ошибка подключения":"Связь со службой не подтверждена";
-  DiagnosticCode.Text="Код: "+(code.Length==0?"ok":code);DiagnosticDetail.Text=detail;SystemState.Text=system;CheckedTime.Text="Последняя проверка: "+(checkedAt==default?"—":checkedAt.ToString("HH:mm:ss"));
-  if(tray!=null){tray.Text=reply.State=="connected"?"Chameleon VPN — подключено":"Chameleon VPN — не подключено";if(trayToggle!=null){trayToggle.Text=active?"Отключить VPN":"Подключить VPN";trayToggle.Enabled=!operation&&hasKey;}}
+  UpdatePower();
+  Motion.SetContent(ConnectButton,working?"Пожалуйста, подождите…":active?"Отключить VPN":!hasKey?"Активировать доступ":"Подключить VPN");
+  Motion.SetText(DiagnosticTitle,brokerReady?code.Length==0?"Служба отвечает":"Служба отвечает · ошибка подключения":"Связь со службой не подтверждена");
+  Motion.SetText(DiagnosticCode,"Код: "+(code.Length==0?"ok":code));Motion.SetText(DiagnosticDetail,detail);Motion.SetText(SystemState,system);CheckedTime.Text="Последняя проверка: "+(checkedAt==default?"—":checkedAt.ToString("HH:mm:ss"));
+  if(tray!=null){tray.Text=reply.State=="connected"?"Chameleon VPN — подключено":"Chameleon VPN — не подключено";if(trayToggle!=null){trayToggle.Text=active?"Отключить VPN":"Подключить VPN";trayToggle.Enabled=!working&&hasKey;}}
  }
 }

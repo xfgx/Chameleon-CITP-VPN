@@ -1,0 +1,11 @@
+[Unit]
+Description=Chameleon: weekly IP-to-ASN table refresh
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=7d
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

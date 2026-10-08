@@ -63,6 +63,21 @@ type Event struct {
 	CaptureID       string       `json:"capture_id,omitempty"`
 	Dropped         uint64       `json:"capture_drops,omitempty"`
 	Observation     string       `json:"observation,omitempty"`
+	// Качество связи (vpn-observer): роль потока, служба, группа клиента
+	// (оператор/ASN или каскад) и признаки «замирания».
+	Role           string          `json:"role,omitempty"`
+	ServerPort     uint16          `json:"server_port,omitempty"`
+	Group          string          `json:"group,omitempty"`
+	ClientNet      string          `json:"client_net,omitempty"`
+	ClientASN      uint32          `json:"client_asn,omitempty"`
+	ClientOrg      string          `json:"client_org,omitempty"`
+	Stalls         uint64          `json:"stalls,omitempty"`
+	StallDir       string          `json:"stall_dir,omitempty"`
+	StallAtBytes   uint64          `json:"stall_at_bytes,omitempty"`
+	StallMS        int64           `json:"stall_ms,omitempty"`
+	StallRecovered bool            `json:"stall_recovered,omitempty"`
+	EndReason      string          `json:"end_reason,omitempty"`
+	Quality        *QualitySummary `json:"quality,omitempty"`
 }
 
 func ID() string {
