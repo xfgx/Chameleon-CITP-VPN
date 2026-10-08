@@ -44,6 +44,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -161,6 +162,17 @@ type Sender struct {
 	// позиции. Гонка существовала и до perf-правок; с общими scratch-буферами
 	// KeyGen она стала бы заметнее.
 	mu sync.Mutex
+	// off — смещение эпохи (в эпохах) под часы получателя, см. SetOffset.
+	off int64
+}
+
+// SetOffset — печатать в эпохе «свои часы + off» (off выучен приёмником
+// обратного направления, Receiver.Offset). Эпоха отправителя только растёт:
+// возврат в уже использованную эпоху повторил бы пары (key, nonce).
+func (s *Sender) SetOffset(off int64) {
+	s.mu.Lock()
+	s.off = off
+	s.mu.Unlock()
 }
 
 // NewRotatingSender — боевой режим: эпоха следует за общим счётчиком времени.
@@ -195,9 +207,10 @@ func (s *Sender) TickEpoch(now time.Time) {
 	if s.T == 0 {
 		return
 	}
-	ep := EpochFor(now, s.T)
-	if ep != s.epoch {
-		s.epoch = ep
+	ep := int64(EpochFor(now, s.T)) + s.off
+	if ep > int64(s.epoch) {
+		s.epoch = uint64(ep)
+		ep := s.epoch
 		s.kg = NewKeyGen(s.master, ep, s.dir)
 		s.aad = ksCstAAD(s.master, ep, s.dir)
 	}
@@ -231,6 +244,7 @@ type ksEpochSink struct {
 	ahead map[[KsNonceLen]byte][ksKeyLen]byte // ключ-массив: без string-аллокаций (2026-09-09, perf)
 	gen   uint64
 	used  uint64
+	full  bool // окно развёрнуто до полного (grow)
 }
 
 func newKsEpochSink(master []byte, epoch uint64, dir string) *ksEpochSink {
@@ -250,9 +264,10 @@ func newKsEpochSink(master []byte, epoch uint64, dir string) *ksEpochSink {
 const ksLazyAhead = 256
 
 // fill — скользящее окно ожидаемых позиций (ленивое, см. ksLazyAhead).
+// После grow() (промах у активного отправителя) окно полное: used + window.
 func (s *ksEpochSink) fill(window uint64) {
 	ahead := s.used + ksLazyAhead
-	if ahead > window {
+	if s.full || ahead > window {
 		ahead = window
 	}
 	for s.gen < s.used+ahead {
@@ -262,31 +277,72 @@ func (s *ksEpochSink) fill(window uint64) {
 	}
 }
 
-// Receiver — принимающая сторона data-plane. Держит текущую и предыдущую
-// эпоху (straddle на границе). Датаграммы независимы: потеря не рвёт
-// состояние, переупорядочивание в пределах окна переживается.
+// grow — развернуть ленивое окно до полного. Лечит регрессию ленивого окна
+// (2026-10-08): потеря > ksLazyAhead датаграмм подряд в начале эпохи больше
+// не останавливает приём до конца эпохи. Один раз на эпоху (full монотонен).
+func (s *ksEpochSink) grow(window uint64) bool {
+	if s.full {
+		return false
+	}
+	s.full = true
+	s.fill(window)
+	return true
+}
+
+// Окно эпох приёмника (2026-10-08, beta): принимаем эпохи base-1, base, base+1,
+// где base = своя эпоха + выученное смещение часов отправителя. Раньше
+// окна «следующей» эпохи не было вовсе: отправитель, спешащий на 1 с,
+// терял 12.5% датаграмм, на 9 с — все. Байты на проводе не меняются.
+const (
+	// ksMaxSkewEpochs — предел выученного смещения (±8 эпох = ±64 с при T=8).
+	ksMaxSkewEpochs = 8
+	// ksResyncSpan — сколько эпох за краем окна пробуем при поиске
+	// (только если отправитель давно молчит; не чаще раза в эпоху).
+	ksResyncSpan = 3
+	// ksShiftMin — сколько датаграмм «только из соседней эпохи» за эпоху
+	// нужно, чтобы сдвинуть смещение (один отставший пакет на границе
+	// эпохи смещение не трогает).
+	ksShiftMin = 3
+)
+
+// Receiver — принимающая сторона data-plane. Датаграммы независимы: потеря
+// не рвёт состояние, переупорядочивание в пределах окна переживается.
 type Receiver struct {
 	master []byte
 	dir    string
 	suite  Suite
 	T      uint64
-	epoch  uint64
-	cur    *ksEpochSink
-	prev   *ksEpochSink
+	epoch  uint64 // своя эпоха (по своим часам)
 	window uint64
+
+	sinks map[uint64]*ksEpochSink
+	floor uint64 // эпохи ниже floor выброшены навсегда (защита от повтора)
+	off   int64  // выученное смещение отправителя, эпох
+	offA  atomic.Int64
+	cnt   [3]int // приняты в эпохе: base-1, base, base+1
+
+	cur, prev *ksEpochSink // представления окна (base, base-1)
+
+	lastOK     time.Time
+	lastSearch uint64
+	resync     bool
+}
+
+func newReceiver(master []byte, dir string, T, ep uint64) *Receiver {
+	r := &Receiver{master: master, dir: dir, T: T, epoch: ep, window: ksWindow,
+		sinks: map[uint64]*ksEpochSink{}, resync: T != 0, lastSearch: ^uint64(0)}
+	r.reindex()
+	return r
 }
 
 // NewRotatingReceiver — боевой режим: эпоха следует за общим счётчиком.
 func NewRotatingReceiver(master []byte, dir string, T uint64, now time.Time) *Receiver {
-	ep := EpochFor(now, T)
-	return &Receiver{master: master, dir: dir, T: T, epoch: ep,
-		cur: newKsEpochSink(master, ep, dir), window: ksWindow}
+	return newReceiver(master, dir, T, EpochFor(now, T))
 }
 
 // NewReceiver — фиксированная эпоха (лаборатория/тесты).
 func NewReceiver(master []byte, epoch uint64, dir string) *Receiver {
-	return &Receiver{master: master, dir: dir, epoch: epoch,
-		cur: newKsEpochSink(master, epoch, dir), window: ksWindow}
+	return newReceiver(master, dir, 0, epoch)
 }
 
 // SetSuite — выбор набора шифров (должен совпадать с отправителем).
@@ -298,23 +354,112 @@ func (r *Receiver) SetSuite(su Suite) error {
 	return nil
 }
 
-// TickEpoch — ротация: текущая эпоха уходит в prev (принимает stragglers),
-// новая становится cur.
+// SetResync — разрешить поиск эпохи за пределами окна (±ksResyncSpan), когда
+// отправитель давно молчит: нужен при большом начальном расхождении часов.
+// Хаб выключает его на общем порту (перебор пользователей × поиск = цена
+// зонда), см. IngestOpt.
+func (r *Receiver) SetResync(on bool) { r.resync = on && r.T != 0 }
+
+// Offset — выученное смещение часов отправителя в эпохах (потокобезопасно).
+// Отправитель обратного направления может печатать в эпохе отправителя
+// (Sender.SetOffset), тогда старым клиентам с окном cur/prev не важен дрейф.
+func (r *Receiver) Offset() int64 { return r.offA.Load() }
+
+func (r *Receiver) base() uint64 {
+	b := int64(r.epoch) + r.off
+	if b < 0 {
+		return 0
+	}
+	return uint64(b)
+}
+
+func (r *Receiver) sink(e uint64, create bool) *ksEpochSink {
+	if s := r.sinks[e]; s != nil {
+		return s
+	}
+	if !create || e < r.floor {
+		return nil
+	}
+	s := newKsEpochSink(r.master, e, r.dir)
+	r.sinks[e] = s
+	return s
+}
+
+// reindex — пересобрать окно вокруг base: всё ниже base-1 выбросить навсегда
+// (floor), выше — оставить (там могли быть принятые датаграммы — повторно
+// создать такую эпоху значило бы открыть повтор).
+func (r *Receiver) reindex() {
+	b := r.base()
+	lo := uint64(0)
+	if b > 0 {
+		lo = b - 1
+	}
+	if r.T == 0 {
+		lo = b
+	}
+	for e := range r.sinks {
+		if e < lo {
+			delete(r.sinks, e)
+			if e+1 > r.floor {
+				r.floor = e + 1
+			}
+		}
+	}
+	r.cur = r.sink(b, true)
+	if r.T == 0 {
+		r.prev = nil
+		return
+	}
+	r.prev = r.sink(b-1, false)
+}
+
+// TickEpoch — ротация по своим часам + подстройка смещения по итогам эпохи.
 func (r *Receiver) TickEpoch(now time.Time) {
 	if r.T == 0 {
 		return
 	}
 	ep := EpochFor(now, r.T)
-	if ep != r.epoch {
-		r.prev = r.cur
-		r.cur = newKsEpochSink(r.master, ep, r.dir)
-		r.epoch = ep
+	if ep == r.epoch {
+		return
 	}
+	if r.cnt[1] == 0 {
+		switch {
+		case r.cnt[0] >= ksShiftMin && r.cnt[2] == 0 && r.off > -ksMaxSkewEpochs:
+			r.off-- // отправитель отстаёт больше чем на эпоху
+		case r.cnt[2] >= ksShiftMin && r.cnt[0] == 0 && r.off < ksMaxSkewEpochs:
+			r.off++ // отправитель спешит больше чем на эпоху
+		}
+	}
+	r.cnt = [3]int{}
+	r.epoch = ep
+	r.offA.Store(r.off)
+	r.reindex()
+}
+
+func (r *Receiver) open(s *ksEpochSink, nkey [KsNonceLen]byte, nonce, ct []byte) ([]byte, bool, bool) {
+	key, ok := s.ahead[nkey]
+	if !ok {
+		return nil, false, false
+	}
+	aead, err := ksAEAD(r.suite, key[:])
+	if err != nil {
+		return nil, false, true
+	}
+	plain, err := aead.Open(nil, nonce, ct, s.aad)
+	if err != nil {
+		return nil, false, true // nonce из расписания, но AEAD не сошёлся — чужой/повреждение
+	}
+	delete(s.ahead, nkey)
+	s.used++
+	return plain, true, true
 }
 
 // Ingest — принять датаграмму с провода. ok=false → вызывающий МОЛЧИТ
 // (probe-invisibility: снаружи порт неотличим от фильтрованного).
-func (r *Receiver) Ingest(wire []byte) ([]byte, bool) {
+func (r *Receiver) Ingest(wire []byte) ([]byte, bool) { return r.IngestOpt(wire, r.resync) }
+
+// IngestOpt — Ingest с явным разрешением поиска эпохи (см. SetResync).
+func (r *Receiver) IngestOpt(wire []byte, search bool) ([]byte, bool) {
 	if len(wire) < KsNonceLen+16 { // nonce + минимальный AEAD-тег
 		return nil, false
 	}
@@ -322,28 +467,126 @@ func (r *Receiver) Ingest(wire []byte) ([]byte, bool) {
 	ct := wire[KsNonceLen:]
 	var nkey [KsNonceLen]byte
 	copy(nkey[:], nonce)
-	for _, s := range []*ksEpochSink{r.cur, r.prev} {
+	b := r.base()
+	// 1) быстрый путь: base, base-1, base+1 (то, что уже есть)
+	order := [3]uint64{b, b - 1, b + 1}
+	slot := [3]int{1, 0, 2}
+	if r.T == 0 || b == 0 {
+		order, slot = [3]uint64{b, b, b}, [3]int{1, 1, 1}
+	}
+	for i, e := range order {
+		s := r.sinks[e]
+		if s == nil || (i > 0 && e == b) {
+			continue
+		}
+		s.fill(r.window)
+		if plain, ok, hit := r.open(s, nkey, nonce, ct); hit {
+			if ok {
+				r.accepted(slot[i])
+			}
+			return plain, ok
+		}
+	}
+	if r.T == 0 {
+		if r.recentlyOK() && r.cur.grow(r.window) {
+			if plain, ok, hit := r.open(r.cur, nkey, nonce, ct); hit {
+				return plain, ok
+			}
+		}
+		return nil, false
+	}
+	// 2) соседние эпохи, которых ещё нет (цена: ksLazyAhead шагов раз в эпоху)
+	for i, e := range order[1:] {
+		if r.sinks[e] != nil || b == 0 {
+			continue
+		}
+		s := r.sink(e, true)
 		if s == nil {
 			continue
 		}
 		s.fill(r.window)
-		key, ok := s.ahead[nkey]
-		if !ok {
-			continue
+		if plain, ok, hit := r.open(s, nkey, nonce, ct); hit {
+			if ok {
+				r.accepted(slot[i+1])
+			}
+			return plain, ok
 		}
-		aead, err := ksAEAD(r.suite, key[:])
-		if err != nil {
-			return nil, false
+	}
+	// 3) отправитель активен — значит промах, скорее всего, длинная серия
+	// потерь: разворачиваем окна до полных (не чаще раза на эпоху). Только
+	// если датаграмма, по мнению вызывающего, наша (search): на общем порту
+	// хаба чужие датаграммы — норма, и разворачивать на них окна всех
+	// активных пользователей было бы дорого.
+	if !search {
+		return nil, false
+	}
+	if r.recentlyOK() {
+		for i, e := range order {
+			s := r.sinks[e]
+			if s == nil || (i > 0 && e == b) || !s.grow(r.window) {
+				continue
+			}
+			if plain, ok, hit := r.open(s, nkey, nonce, ct); hit {
+				if ok {
+					r.accepted(slot[i])
+				}
+				return plain, ok
+			}
 		}
-		plain, err := aead.Open(nil, nonce, ct, s.aad)
-		if err != nil {
-			return nil, false // nonce из расписания, но AEAD не сошёлся — чужой/повреждение
+		return nil, false
+	}
+	// 4) отправитель давно молчит — поиск эпохи за краем окна, раз в эпоху.
+	if r.lastSearch == r.epoch {
+		return nil, false
+	}
+	r.lastSearch = r.epoch
+	for d := int64(2); d <= ksResyncSpan+1; d++ {
+		for _, sg := range [2]int64{1, -1} {
+			e := int64(b) + sg*d
+			if e < int64(r.floor) || e < 0 || (int64(e)-int64(r.epoch)) > ksMaxSkewEpochs || (int64(r.epoch)-int64(e)) > ksMaxSkewEpochs {
+				continue
+			}
+			ue := uint64(e)
+			s := r.sinks[ue]
+			tmp := s == nil
+			if tmp {
+				s = newKsEpochSink(r.master, ue, r.dir)
+			}
+			s.fill(r.window)
+			plain, ok, hit := r.open(s, nkey, nonce, ct)
+			if !hit {
+				continue
+			}
+			if !ok {
+				return nil, false
+			}
+			// нашли: переезжаем окном к эпохе отправителя
+			r.sinks[ue] = s
+			r.off = int64(ue) - int64(r.epoch)
+			r.offA.Store(r.off)
+			r.cnt = [3]int{0, 1, 0}
+			r.lastOK = time.Now()
+			r.reindex()
+			return plain, true
 		}
-		delete(s.ahead, nkey)
-		s.used++
-		return plain, true
 	}
 	return nil, false
+}
+
+func (r *Receiver) accepted(slot int) {
+	r.cnt[slot]++
+	r.lastOK = time.Now()
+}
+
+func (r *Receiver) recentlyOK() bool {
+	if r.lastOK.IsZero() {
+		return false
+	}
+	lim := time.Duration(r.T) * 2 * time.Second
+	if lim == 0 {
+		lim = 16 * time.Second
+	}
+	return time.Since(r.lastOK) <= lim
 }
 
 // --- гейт бит-идентичности -------------------------------------------------

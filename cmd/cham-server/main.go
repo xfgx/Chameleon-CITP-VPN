@@ -40,7 +40,7 @@ import (
 //
 //	cham-server -listen 0.0.0.0:8443 -keyfile /root/cham-server.key -cbr 40ms
 func main() {
-	listen := flag.String("listen", "0.0.0.0:9443", "адрес прослушивания")
+	listen := flag.String("listen", "0.0.0.0:443,0.0.0.0:9443", "адрес(а) прослушивания через запятую; 443 — порт HTTPS (политика «только порты < 1000»). Занятые адреса пропускаются, нужен хотя бы один")
 	keyfile := flag.String("keyfile", "cham-server.key", "файл приватного ключа ноды")
 	genkey := flag.Bool("genkey", false, "сгенерировать ключ ноды, показать публичный и выйти")
 	cbr := flag.Duration("cbr", 0, "интервал CBR-паддинга (0 = выкл), напр. 40ms")
@@ -186,9 +186,20 @@ func main() {
 	}
 
 	strikes := newStrikeList()
-	ln, err := net.Listen("tcp", *listen)
-	if err != nil {
-		log.Fatal(err)
+	var lns []net.Listener
+	for _, a := range strings.Split(*listen, ",") {
+		if a = strings.TrimSpace(a); a == "" {
+			continue
+		}
+		l, err := net.Listen("tcp", a)
+		if err != nil {
+			log.Printf("слушатель %s: %v — пропускаю", a, err)
+			continue
+		}
+		lns = append(lns, l)
+	}
+	if len(lns) == 0 {
+		log.Fatalf("ни один адрес из -listen %q не открылся", *listen)
 	}
 	log.Printf("cham-server v2: нода слушает %s (cbr=%v, blackhole=%v, max-connections=%d)", *listen, *cbr, *hold, *maxConnections)
 	gate := newConnGate(*maxConnections, *maxPending, *maxPendingPerAddr, *maxPendingPerNet)
@@ -230,22 +241,28 @@ func main() {
 		}()
 	}
 
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			return
+	serve := func(ln net.Listener) {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			addr, nw := addrKeys(ipOf(c))
+			ticket, ok := gate.admit(addr, nw)
+			if !ok {
+				_ = c.Close()
+				continue
+			}
+			go func() {
+				defer ticket.done()
+				handle(c, priv, allow, strikes, policyEngine, cf, chain, *cbr, *dialTimeout, *flavorName, *hold, ticket)
+			}()
 		}
-		addr, nw := addrKeys(ipOf(c))
-		ticket, ok := gate.admit(addr, nw)
-		if !ok {
-			_ = c.Close()
-			continue
-		}
-		go func() {
-			defer ticket.done()
-			handle(c, priv, allow, strikes, policyEngine, cf, chain, *cbr, *dialTimeout, *flavorName, *hold, ticket)
-		}()
 	}
+	for _, l := range lns[1:] {
+		go serve(l)
+	}
+	serve(lns[0])
 }
 
 // loadOrGenClientKey читает клиентский ключ каскада из файла; при отсутствии

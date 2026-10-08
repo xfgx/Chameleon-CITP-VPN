@@ -100,6 +100,7 @@ func main() {
 	wire6Rot := flag.Uint64("wire6rot", 30, "клиент: пересадка случайного исходного порта v6-провода, сек (0 = порт на весь запуск)")
 	wire6Src := flag.String("wire6src", "", "клиент: пул ИСХОДНЫХ v6-адресов провода — \"auto\" (нативный префикс провайдера) или CIDR; каждая датаграмма уходит со случайного адреса набора")
 	wire6SrcN := flag.Int("wire6srcn", 16, "клиент: сколько исходных v6-адресов держать одновременно (1..64)")
+	padMax := flag.Int("pad", 0, "дописывать к IP-пакетам < 600 Б случайно 0..N байт (против ACK-эха; получатель — Linux, ядро обрежет хвост по заголовку); 0 = выкл")
 	flag.Parse()
 
 	log.SetPrefix("[ks-vpn] ")
@@ -317,6 +318,7 @@ func main() {
 			var seq uint16
 			for range tk.C {
 				seq++
+				tx.SetOffset(rx.Offset())
 				tx.TickEpoch(time.Now())
 				wire := tx.Seal(icmpEcho(ownTun4, peerTun4, kaID, seq))
 				if w6 != nil && !w6.ok.Load() {
@@ -409,9 +411,10 @@ func main() {
 			cLoopGuard.Add(1)
 			continue
 		}
+		tx.SetOffset(rx.Offset())
 		tx.TickEpoch(time.Now())
 		// packet-aligned: один IP-пакет = одна KS-датаграмма.
-		wire := tx.Seal(buf[:n])
+		wire := tx.Seal(chaossync.PadIP(buf[:n], *padMax, 600))
 		sendWire(wire)
 	}
 }

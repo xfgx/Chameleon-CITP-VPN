@@ -1,0 +1,610 @@
+{
+ "ks": {
+  "capture": {
+   "packets": 29473,
+   "data_packets": 29473,
+   "result": {
+    "ok": 56,
+    "fail": 0,
+    "bytes": 21301274,
+    "bulk_mbps": 74.73
+   },
+   "signature": null,
+   "fet": {
+    "rule": true,
+    "popcount": 4.09,
+    "exempt": []
+   },
+   "first_payload_len": 56,
+   "entropy_first5": 7.3,
+   "idle": {
+    "pkts": 2,
+    "periodic": false
+   },
+   "ack_echo": {
+    "up_pkts": 10644,
+    "up_per_MB": 495,
+    "mode_len": 108,
+    "mode_share": 0.97,
+    "flag": true
+   },
+   "bulk_down": {
+    "mode_len": 1328,
+    "mode_share": 1.0
+   },
+   "size_entropy_bits": 2.74,
+   "mod16_share": 0.15,
+   "distinct_sizes": 39,
+   "overhead_pct": 13.6,
+   "server_endpoints": 1,
+   "client_ports": 1
+  },
+  "sessions": {
+   "sessions": 5,
+   "same_first5_share": 0.6,
+   "example": "↑88 ↓88 ↑80 ↑204 ↓80",
+   "stable": false
+  },
+  "probe": {
+   "summary": "ответов 0/10 — сервер молчит",
+   "answered": [],
+   "flag": false
+  },
+  "policy": {
+   "none": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 10.4,
+    "status": "ok"
+   },
+   "ports-lt1000": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "udp-block": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "freeze16k": {
+    "ok": 0,
+    "fail": 17,
+    "mbps": null,
+    "status": "fail"
+   },
+   "udp-ban": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   }
+  },
+  "flags": {
+   "sig": null,
+   "fet": true,
+   "first5": false,
+   "idle": false,
+   "ack": true,
+   "mod16": false,
+   "probe": false
+  },
+  "score": 2
+ },
+ "citp": {
+  "capture": {
+   "packets": 10586,
+   "data_packets": 6318,
+   "result": {
+    "ok": 55,
+    "fail": 0,
+    "bytes": 6701018,
+    "bulk_mbps": 49.51
+   },
+   "signature": null,
+   "fet": {
+    "rule": true,
+    "popcount": 3.89,
+    "exempt": []
+   },
+   "first_payload_len": 104,
+   "entropy_first5": 7.65,
+   "idle": {
+    "pkts": 8,
+    "period_s": 5.0,
+    "cv": 0.001,
+    "periodic": true,
+    "sizes": [
+     55,
+     67,
+     74,
+     76,
+     91,
+     154
+    ]
+   },
+   "ack_echo": {
+    "up_pkts": 4,
+    "up_per_MB": 1,
+    "mode_len": 46,
+    "mode_share": 0.25,
+    "flag": false
+   },
+   "bulk_down": {
+    "mode_len": 1448,
+    "mode_share": 0.98
+   },
+   "size_entropy_bits": 3.1,
+   "mod16_share": 0.08,
+   "distinct_sizes": 227,
+   "overhead_pct": 28.7,
+   "server_endpoints": 1,
+   "client_ports": 1
+  },
+  "sessions": {
+   "sessions": 5,
+   "same_first5_share": 0.2,
+   "example": "↑104 ↓64 ↑133 ↓68 ↑82",
+   "stable": false
+  },
+  "probe": {
+   "summary": "порт открыт; ответных байт 0; закрытие: fin через [15.1, 45.1] с",
+   "reply_bytes": 0,
+   "fixed_close": false,
+   "close_s": [
+    15.1,
+    45.1
+   ],
+   "flag": false
+  },
+  "policy": {
+   "freeze16k": {
+    "ok": 0,
+    "fail": 17,
+    "mbps": null,
+    "status": "fail"
+   },
+   "udp-block": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 29.7,
+    "status": "ok"
+   },
+   "ports-lt1000": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "none": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 29.84,
+    "status": "ok"
+   },
+   "udp-ban": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 30.17,
+    "status": "ok"
+   }
+  },
+  "flags": {
+   "sig": null,
+   "fet": true,
+   "first5": false,
+   "idle": true,
+   "ack": false,
+   "mod16": false,
+   "probe": false
+  },
+  "score": 2
+ },
+ "citp-cbr": {
+  "capture": {
+   "packets": 23475,
+   "data_packets": 14871,
+   "result": {
+    "ok": 55,
+    "fail": 0,
+    "bytes": 15966164,
+    "bulk_mbps": 94.72
+   },
+   "signature": null,
+   "fet": {
+    "rule": true,
+    "popcount": 3.93,
+    "exempt": []
+   },
+   "first_payload_len": 104,
+   "entropy_first5": 7.72,
+   "idle": {
+    "pkts": 24,
+    "period_s": 1.58,
+    "cv": 0.431,
+    "periodic": false,
+    "sizes": [
+     53,
+     66,
+     76,
+     85,
+     103,
+     148
+    ]
+   },
+   "ack_echo": {
+    "up_pkts": 4,
+    "up_per_MB": 0,
+    "mode_len": 165,
+    "mode_share": 0.25,
+    "flag": false
+   },
+   "bulk_down": {
+    "mode_len": 1448,
+    "mode_share": 0.98
+   },
+   "size_entropy_bits": 3.49,
+   "mod16_share": 0.08,
+   "distinct_sizes": 286,
+   "overhead_pct": 30.3,
+   "server_endpoints": 1,
+   "client_ports": 1
+  },
+  "sessions": {
+   "sessions": 5,
+   "same_first5_share": 0.2,
+   "example": "↑104 ↓64 ↓1305 ↓1073 ↓855",
+   "stable": false
+  },
+  "probe": {
+   "summary": "порт открыт; ответных байт 0; закрытие: fin через [15.1, 15.2, 45.1] с",
+   "reply_bytes": 0,
+   "fixed_close": false,
+   "close_s": [
+    15.1,
+    15.2,
+    45.1
+   ],
+   "flag": false
+  },
+  "policy": {
+   "udp-block": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 29.6,
+    "status": "ok"
+   },
+   "none": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 30.39,
+    "status": "ok"
+   },
+   "udp-ban": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 29.99,
+    "status": "ok"
+   },
+   "ports-lt1000": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "freeze16k": {
+    "ok": 0,
+    "fail": 17,
+    "mbps": null,
+    "status": "fail"
+   }
+  },
+  "flags": {
+   "sig": null,
+   "fet": true,
+   "first5": false,
+   "idle": false,
+   "ack": false,
+   "mod16": false,
+   "probe": false
+  },
+  "score": 1
+ },
+ "wg": {
+  "capture": {
+   "packets": 26750,
+   "data_packets": 26750,
+   "result": {
+    "ok": 56,
+    "fail": 0,
+    "bytes": 21301274,
+    "bulk_mbps": 81.45
+   },
+   "signature": "WireGuard",
+   "fet": {
+    "rule": true,
+    "popcount": 3.53,
+    "exempt": []
+   },
+   "first_payload_len": 148,
+   "entropy_first5": 6.68,
+   "idle": {
+    "pkts": 1,
+    "periodic": false
+   },
+   "ack_echo": {
+    "up_pkts": 9672,
+    "up_per_MB": 457,
+    "mode_len": 112,
+    "mode_share": 0.98,
+    "flag": true
+   },
+   "bulk_down": {
+    "mode_len": 1452,
+    "mode_share": 1.0
+   },
+   "size_entropy_bits": 2.05,
+   "mod16_share": 0.97,
+   "distinct_sizes": 30,
+   "overhead_pct": 11.8,
+   "server_endpoints": 1,
+   "client_ports": 1
+  },
+  "sessions": {
+   "sessions": 5,
+   "same_first5_share": 1.0,
+   "example": "↑148 ↓92 ↑32 ↑96 ↓96",
+   "stable": true
+  },
+  "probe": {
+   "summary": "ответов 0/10 — сервер молчит",
+   "answered": [],
+   "flag": false
+  },
+  "policy": {
+   "freeze16k": {
+    "ok": 0,
+    "fail": 17,
+    "mbps": null,
+    "status": "fail"
+   },
+   "udp-ban": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "udp-block": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "ports-lt1000": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "none": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 27.75,
+    "status": "ok"
+   }
+  },
+  "flags": {
+   "sig": "WireGuard",
+   "fet": true,
+   "first5": true,
+   "idle": false,
+   "ack": true,
+   "mod16": true,
+   "probe": false
+  },
+  "score": 5
+ },
+ "ovpn": {
+  "capture": {
+   "packets": 27585,
+   "data_packets": 27585,
+   "result": {
+    "ok": 56,
+    "fail": 0,
+    "bytes": 21301274,
+    "bulk_mbps": 10.05
+   },
+   "signature": "OpenVPN",
+   "fet": {
+    "rule": false,
+    "popcount": 2.14,
+    "exempt": [
+     "Ex1 popcount"
+    ]
+   },
+   "first_payload_len": 14,
+   "entropy_first5": 6.24,
+   "idle": {
+    "pkts": 3,
+    "periodic": false
+   },
+   "ack_echo": {
+    "up_pkts": 10766,
+    "up_per_MB": 514,
+    "mode_len": 104,
+    "mode_share": 0.42,
+    "flag": false
+   },
+   "bulk_down": {
+    "mode_len": 1464,
+    "mode_share": 1.0
+   },
+   "size_entropy_bits": 2.79,
+   "mod16_share": 0.15,
+   "distinct_sizes": 40,
+   "overhead_pct": 10.4,
+   "server_endpoints": 1,
+   "client_ports": 1
+  },
+  "sessions": {
+   "sessions": 5,
+   "same_first5_share": 0.4,
+   "example": "↑14 ↓26 ↑303 ↓1051 ↑26",
+   "stable": false
+  },
+  "probe": {
+   "summary": "ответов 1/10 (random-64)",
+   "answered": [
+    "random-64"
+   ],
+   "flag": true
+  },
+  "policy": {
+   "none": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 15.45,
+    "status": "ok"
+   },
+   "udp-block": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "udp-ban": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "ports-lt1000": {
+    "ok": 0,
+    "fail": 1,
+    "mbps": null,
+    "status": "fail"
+   },
+   "freeze16k": {
+    "ok": 7,
+    "fail": 10,
+    "mbps": null,
+    "status": "partial"
+   }
+  },
+  "flags": {
+   "sig": "OpenVPN",
+   "fet": false,
+   "first5": false,
+   "idle": false,
+   "ack": false,
+   "mod16": false,
+   "probe": true
+  },
+  "score": 2
+ },
+ "tls": {
+  "capture": {
+   "packets": 25303,
+   "data_packets": 14929,
+   "result": {
+    "ok": 56,
+    "fail": 0,
+    "bytes": 21301274,
+    "bulk_mbps": 98.63
+   },
+   "signature": "TLS",
+   "fet": {
+    "rule": false,
+    "popcount": 2.66,
+    "exempt": [
+     "Ex1 popcount",
+     "Ex5 протокол"
+    ]
+   },
+   "first_payload_len": 517,
+   "entropy_first5": 7.36,
+   "idle": {
+    "pkts": 0,
+    "periodic": false
+   },
+   "ack_echo": {
+    "up_pkts": 3,
+    "up_per_MB": 0,
+    "mode_len": 517,
+    "mode_share": 0.33,
+    "flag": false
+   },
+   "bulk_down": {
+    "mode_len": 1448,
+    "mode_share": 1.0
+   },
+   "size_entropy_bits": 1.7,
+   "mod16_share": 0.15,
+   "distinct_sizes": 34,
+   "overhead_pct": -0.2,
+   "server_endpoints": 1,
+   "client_ports": 56
+  },
+  "sessions": {
+   "sessions": 5,
+   "same_first5_share": 0.4,
+   "example": "↑517 ↓1351 ↑80 ↑146 ↓29",
+   "stable": false
+  },
+  "probe": {
+   "summary": "порт открыт; ответных байт 0; закрытие: rst/timeout через [69.8, 70.0, 70.1] с",
+   "reply_bytes": 0,
+   "fixed_close": false,
+   "close_s": [
+    69.8,
+    70.0,
+    70.1
+   ],
+   "flag": false
+  },
+  "policy": {
+   "udp-ban": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 25.51,
+    "status": "ok"
+   },
+   "freeze16k": {
+    "ok": 8,
+    "fail": 9,
+    "mbps": null,
+    "status": "partial"
+   },
+   "ports-lt1000": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 25.45,
+    "status": "ok"
+   },
+   "none": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 26.76,
+    "status": "ok"
+   },
+   "udp-block": {
+    "ok": 17,
+    "fail": 0,
+    "mbps": 25.23,
+    "status": "ok"
+   }
+  },
+  "flags": {
+   "sig": null,
+   "fet": false,
+   "first5": false,
+   "idle": false,
+   "ack": false,
+   "mod16": false,
+   "probe": false
+  },
+  "score": 0
+ }
+}

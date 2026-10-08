@@ -39,7 +39,7 @@ func newSemanticUDP(hostport string) *semanticUDPState {
 	if port == "53" {
 		budget = 5 * time.Second
 	}
-	return &semanticUDPState{input: make(chan semanticDatagram, streamQueueDepth), budget: budget}
+	return &semanticUDPState{input: make(chan semanticDatagram, semanticUDPQueueDepth), budget: budget}
 }
 
 // OpenUDP retains the length-prefixed Stream API for SOCKS/TUN callers, but

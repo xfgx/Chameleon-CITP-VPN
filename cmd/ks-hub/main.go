@@ -104,10 +104,13 @@ type user struct {
 
 // open — попытка расшифровать датаграмму ключевым расписанием этого
 // пользователя. false = это не он (или шум/повтор).
-func (u *user) open(wire []byte) ([]byte, bool) {
+// hubPad — см. флаг -pad.
+var hubPad int
+
+func (u *user) open(wire []byte, search bool) ([]byte, bool) {
 	u.rxMu.Lock()
 	u.rx.TickEpoch(time.Now())
-	plain, ok := u.rx.Ingest(wire)
+	plain, ok := u.rx.IngestOpt(wire, search)
 	u.rxMu.Unlock()
 	return plain, ok
 }
@@ -167,6 +170,7 @@ func main() {
 	tunName := flag.String("tun", "kshub0", "имя TUN-адаптера хаба")
 	inner := flag.String("innerself", "10.99.9.2/24", "внутренний адрес хаба и CIDR общей сети пользователей")
 	listen := flag.Int("listen", 51830, "UDP-порт приёма")
+	flag.IntVar(&hubPad, "pad", 0, "паддинг пакетов < 600 Б к клиентам: +0..N случайных байт (клиент на Linux/Android обрежет по IP-заголовку); 0 = выкл")
 	rotT := flag.Uint64("T", 8, "период ротации эпох, сек (обязан совпадать с клиентами)")
 	workers := flag.Int("workers", 0, "воркеров на направление (0 = по числу ядер)")
 	idle := flag.Int64("idle", 300, "сек тишины, после которых выученный адрес клиента не используется")
@@ -507,7 +511,7 @@ func demux(p inPkt) (*user, []byte) {
 		if u == nil {
 			return nil, nil
 		}
-		if plain, ok := u.open(p.data); ok {
+		if plain, ok := u.open(p.data, true); ok {
 			return u, plain
 		}
 		return nil, nil
@@ -515,14 +519,14 @@ func demux(p inPkt) (*user, []byte) {
 	key := p.src.String()
 	if v, ok := srcCache.Load(key); ok {
 		if u, ok2 := v.(*user); ok2 {
-			if plain, ok3 := u.open(p.data); ok3 {
+			if plain, ok3 := u.open(p.data, true); ok3 {
 				return u, plain
 			}
 			srcCache.Delete(key) // адрес переехал к другому человеку
 		}
 	}
 	for _, u := range t.users {
-		if plain, ok := u.open(p.data); ok {
+		if plain, ok := u.open(p.data, false); ok {
 			srcCache.Store(key, u)
 			return u, plain
 		}
@@ -637,8 +641,11 @@ func sealWorker(q chan outPkt) {
 			cNoPeer.Add(1)
 			continue
 		}
+		// печатаем в эпохе часов клиента: старым клиентам (окно cur/prev)
+		// дрейф их часов больше не страшен
+		u.tx.SetOffset(u.rx.Offset())
 		u.tx.TickEpoch(time.Now())
-		wire := u.tx.Seal(p.data)
+		wire := u.tx.Seal(chaossync.PadIP(p.data, hubPad, 600))
 		c := u.conn.Load()
 		if c == nil {
 			c = sock

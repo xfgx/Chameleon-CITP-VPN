@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mrand "math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -58,15 +59,16 @@ const (
 	smCSTSnapshot  = 0x1A // snapshot/compaction (CSTSnapshot)
 	smCSTDetach    = 0x1B // detach от FlowID (CSTDetach)
 
-	muxHeader           = 5
-	muxMaxData          = 60000
-	openTimout          = 15 * time.Second
-	streamQueueDepth    = 16
-	defaultMaxStreams   = 256
-	maxPendingHandlers  = 64
-	maxResolutionCache  = 256
-	maxOpenPayloadBytes = 2048
-	maxErrorPayload     = 512
+	muxHeader             = 5
+	muxMaxData            = 60000
+	openTimout            = 15 * time.Second
+	streamQueueDepth      = 256 // было 16: мелкая очередь рвала крупные загрузки (см. feed)
+	semanticUDPQueueDepth = 16  // датаграммы: при переполнении отбрасываем (UDP-семантика)
+	defaultMaxStreams     = 256
+	maxPendingHandlers    = 64
+	maxResolutionCache    = 256
+	maxOpenPayloadBytes   = 2048
+	maxErrorPayload       = 512
 
 	pingInterval = 5 * time.Second
 )
@@ -74,10 +76,10 @@ const (
 // Stream — один мультиплексированный поток. Реализует net.Conn-подобный
 // интерфейс (Read/Write/Close).
 type Stream struct {
-	m    *Mux
-	id   uint32
-	inCh chan []byte
-	udp *semanticUDPState
+	m                 *Mux
+	id                uint32
+	inCh              chan []byte
+	udp               *semanticUDPState
 	capabilitiesProbe bool
 
 	mu        sync.Mutex
@@ -103,15 +105,30 @@ func (s *Stream) closeInput() {
 	})
 }
 
+// feedBlock — сколько ждём места в очереди медленного потока, прежде чем
+// признать его зависшим. Пока ждём, read-цикл mux не читает сокет → TCP-окно
+// закрывается → отправитель притормаживает (настоящий backpressure). Раньше
+// очередь переполнялась мгновенно и поток закрывался (большие загрузки
+// обрывались, bug 2026-10-08). Закрываем только если читатель реально завис.
+const feedBlock = 30 * time.Second
+
 func (s *Stream) feed(p []byte) (accepted bool) {
-	// A slow stream must not block the single mux read loop indefinitely.
-	// The queue is bounded; overflow closes only the offending stream.
 	defer func() { _ = recover() }()
 	payload := append([]byte(nil), p...)
+	// быстрый путь — очередь не полна
 	select {
 	case s.inCh <- payload:
 		return true
 	default:
+	}
+	// подпор: ждём место ограниченное время (не читая сокет — это и есть
+	// сигнал TCP отправителю замедлиться)
+	t := time.NewTimer(feedBlock)
+	defer t.Stop()
+	select {
+	case s.inCh <- payload:
+		return true
+	case <-t.C:
 		_ = s.m.send(s.id, smClose, nil)
 		s.m.remove(s.id)
 		return false
@@ -119,8 +136,12 @@ func (s *Stream) feed(p []byte) (accepted bool) {
 }
 
 func (s *Stream) Read(p []byte) (int, error) {
-	if s.udp != nil {return s.readFramedDatagrams(p)}
-	if len(p)==0{return 0,nil}
+	if s.udp != nil {
+		return s.readFramedDatagrams(p)
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
 	s.mu.Lock()
 	if len(s.buf) > 0 {
 		n := copy(p, s.buf)
@@ -146,7 +167,9 @@ func (s *Stream) Read(p []byte) (int, error) {
 }
 
 func (s *Stream) Write(p []byte) (int, error) {
-	if s.udp != nil {return s.writeFramedDatagrams(p)}
+	if s.udp != nil {
+		return s.writeFramedDatagrams(p)
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -183,8 +206,8 @@ type Mux struct {
 	payloadSent       atomic.Uint64
 	payloadReceived   atomic.Uint64
 	issuedResolutions resolutionIssuance
-	protocolMu sync.Mutex
-	protocolReady atomic.Bool
+	protocolMu        sync.Mutex
+	protocolReady     atomic.Bool
 
 	mu      sync.Mutex
 	streams map[uint32]*Stream
@@ -248,9 +271,12 @@ func (m *Mux) RTT() time.Duration { return time.Duration(m.rtt.Load()) }
 // payload, и RTT вычисляется по разнице. Заодно это удерживает NAT-маппинги
 // и не даёт ТСПУ/файрволам убить «молчащее» соединение.
 func (m *Mux) keepalive() {
-	t := time.NewTicker(pingInterval)
-	defer t.Stop()
-	for range t.C {
+	for {
+		// Джиттер: интервал pingInterval ± до 40% вместо ровных 5.0 с.
+		// Ровный пульс (CV≈0) был отпечатком для DPI (детектор D4). RTT
+		// по-прежнему измеряется по эху smPong, здесь важен только разброс.
+		d := pingInterval - pingInterval*2/5 + time.Duration(mrand.Int63n(int64(pingInterval*4/5)))
+		time.Sleep(d)
 		if !m.Alive() {
 			return
 		}
@@ -441,21 +467,32 @@ func (m *Mux) loop() {
 		sid := binary.BigEndian.Uint32(f)
 		cmd := f[4]
 		payload := f[muxHeader:]
-        // Live v4 nodes use 0x10..0x12 for capability negotiation; public CST uses
-        // the same numeric range with structured (longer) payloads. Distinguish
-        // request shape and a registered probe, never renumber an existing wire protocol.
-        if cmd==smCapabilities && len(payload)==len(protocolCapabilities) {
-            if bytes.Equal(payload,protocolCapabilities){_ = m.send(sid,smCapabilitiesOK,protocolCapabilities)}else{_ = m.send(sid,smCapabilitiesErr,[]byte(ErrProtocolUpgrade.Error()))}
-            continue
-        }
-        if cmd==smCapabilitiesOK || cmd==smCapabilitiesErr {
-            if s:=m.get(sid);s!=nil && s.capabilitiesProbe && s.openDone!=nil {
-                var err error
-                if cmd==smCapabilitiesErr {err=errors.New(string(payload))}else{s.feed(payload)}
-                select{case s.openDone<-err:default:}
-                continue
-            }
-        }
+		// Live v4 nodes use 0x10..0x12 for capability negotiation; public CST uses
+		// the same numeric range with structured (longer) payloads. Distinguish
+		// request shape and a registered probe, never renumber an existing wire protocol.
+		if cmd == smCapabilities && len(payload) == len(protocolCapabilities) {
+			if bytes.Equal(payload, protocolCapabilities) {
+				_ = m.send(sid, smCapabilitiesOK, protocolCapabilities)
+			} else {
+				_ = m.send(sid, smCapabilitiesErr, []byte(ErrProtocolUpgrade.Error()))
+			}
+			continue
+		}
+		if cmd == smCapabilitiesOK || cmd == smCapabilitiesErr {
+			if s := m.get(sid); s != nil && s.capabilitiesProbe && s.openDone != nil {
+				var err error
+				if cmd == smCapabilitiesErr {
+					err = errors.New(string(payload))
+				} else {
+					s.feed(payload)
+				}
+				select {
+				case s.openDone <- err:
+				default:
+				}
+				continue
+			}
+		}
 		switch cmd {
 		case smOpen:
 			if m.onOpen != nil {
@@ -463,7 +500,7 @@ func (m *Mux) loop() {
 				m.dispatch(sid, smOpenErr, func() { m.onOpen(m, sid, p) })
 			}
 		case smData:
-			if s := m.get(sid); s != nil && s.udp==nil {
+			if s := m.get(sid); s != nil && s.udp == nil {
 				s.feed(payload)
 			}
 		case smClose:
@@ -715,7 +752,9 @@ func (m *Mux) OpenWithResolve(domain, port string) (*Stream, *ResolutionObject, 
 
 // Resolve запрашивает у ноды ResolutionObject для домена.
 func (m *Mux) Resolve(domain string) (*ResolutionObject, error) {
-	if err:=m.RequireCapabilities();err!=nil{return nil,err}
+	if err := m.RequireCapabilities(); err != nil {
+		return nil, err
+	}
 	if !m.Alive() {
 		return nil, m.Err()
 	}
@@ -829,7 +868,9 @@ func (m *Mux) ResumeStream(ticket *MigrationTicket) error {
 
 // OpenRaw открывает поток с готовой кодировкой цели (TCP или UDP-маркер).
 func (m *Mux) OpenRaw(enc []byte) (*Stream, error) {
-	if err:=m.RequireCapabilities();err!=nil{return nil,err}
+	if err := m.RequireCapabilities(); err != nil {
+		return nil, err
+	}
 	if !m.Alive() {
 		return nil, m.Err()
 	}
@@ -838,7 +879,9 @@ func (m *Mux) OpenRaw(enc []byte) (*Stream, error) {
 	m.nextID++
 	m.mu.Unlock()
 	s := &Stream{m: m, id: sid, inCh: make(chan []byte, streamQueueDepth), openDone: make(chan error, 1)}
-	if len(enc)>1 && enc[0]==semanticUDPMarker{s.udp=newSemanticUDP(string(enc[1:]))}
+	if len(enc) > 1 && enc[0] == semanticUDPMarker {
+		s.udp = newSemanticUDP(string(enc[1:]))
+	}
 	if err := m.putStream(s); err != nil {
 		return nil, err
 	}
@@ -869,7 +912,12 @@ func (m *Mux) openRawAuth(payload []byte) (*Stream, error) {
 	m.nextID++
 	m.mu.Unlock()
 	s := &Stream{m: m, id: sid, inCh: make(chan []byte, streamQueueDepth), openDone: make(chan error, 1)}
-	if len(payload)>=2{off:=2+int(binary.BigEndian.Uint16(payload[:2]));if off<len(payload)&&payload[off]==semanticUDPMarker{s.udp=newSemanticUDP(string(payload[off+1:]))}}
+	if len(payload) >= 2 {
+		off := 2 + int(binary.BigEndian.Uint16(payload[:2]))
+		if off < len(payload) && payload[off] == semanticUDPMarker {
+			s.udp = newSemanticUDP(string(payload[off+1:]))
+		}
+	}
 	if err := m.putStream(s); err != nil {
 		return nil, err
 	}
@@ -928,10 +976,15 @@ func serveMuxWithConfig(conn *Conn, dialTimeout time.Duration, policy *PolicyEng
 			_ = m.send(sid, smOpenErr, []byte("open: invalid target length"))
 			return
 		}
-		if target[0]==semanticUDPMarker {
-            hostport:=string(target[1:]);if err:=m.authorizeOpen(hostport);err!=nil{_ = m.send(sid,smOpenErr,boundedText(err));return}
-            m.serveSemanticUDP(sid,hostport);return
-        }
+		if target[0] == semanticUDPMarker {
+			hostport := string(target[1:])
+			if err := m.authorizeOpen(hostport); err != nil {
+				_ = m.send(sid, smOpenErr, boundedText(err))
+				return
+			}
+			m.serveSemanticUDP(sid, hostport)
+			return
+		}
 		if target[0] == udpTargetMarker {
 			hostport := string(target[1:])
 			if err := m.authorizeOpen(hostport); err != nil {
@@ -1008,10 +1061,14 @@ func serveMuxWithConfig(conn *Conn, dialTimeout time.Duration, policy *PolicyEng
 			_ = m.send(sid, smOpenErr, boundedText(err))
 			return
 		}
-		target:=payload[2+roLen:]
-        semanticUDP:=len(target)>1 && target[0]==semanticUDPMarker
-        var hostport string
-        if semanticUDP{hostport=string(target[1:])}else{hostport,err=ParseTarget(target)}
+		target := payload[2+roLen:]
+		semanticUDP := len(target) > 1 && target[0] == semanticUDPMarker
+		var hostport string
+		if semanticUDP {
+			hostport = string(target[1:])
+		} else {
+			hostport, err = ParseTarget(target)
+		}
 		if err != nil {
 			m.send(sid, smOpenErr, []byte("open-auth: "+err.Error()))
 			return
@@ -1030,7 +1087,10 @@ func serveMuxWithConfig(conn *Conn, dialTimeout time.Duration, policy *PolicyEng
 			_ = m.send(sid, smOpenErr, boundedText(err))
 			return
 		}
-		if semanticUDP{m.serveSemanticUDP(sid,hostport);return}
+		if semanticUDP {
+			m.serveSemanticUDP(sid, hostport)
+			return
+		}
 		m.openAndRelay(sid, hostport, dialTimeout)
 	}
 

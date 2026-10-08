@@ -92,7 +92,7 @@ func TestSemanticUDPFragmentReplayAndBoundedQueue(t *testing.T) {
 		s.feedSemanticDatagram(obj)
 		s.feedSemanticDatagram(obj)
 	}
-	if len(s.udp.input) != streamQueueDepth || conn.DatagramStats().QueueDropped != 24 {
+	if len(s.udp.input) != semanticUDPQueueDepth || conn.DatagramStats().QueueDropped != 24 {
 		t.Fatalf("unbounded queue or replay admitted: %+v", conn.DatagramStats())
 	}
 }

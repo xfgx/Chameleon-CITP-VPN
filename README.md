@@ -102,6 +102,28 @@ make setup && ./bin/chameleon-setup        # Windows: bin\chameleon-setup.exe
 Итог: одно ядро комфортно держит **~300 пользователей** (p95 < 0,7 с со своими портами). До 700 пользователей все остаются на связи, но задержка растёт. На 1000 хаб 3 больше не падает целиком, как хаб 2. Узкое место — CPU хаба (очередь приёма переполняется), памяти хватает с запасом. Больше пользователей — больше ядер: `bench.sh capacity` с `PROFILES="1:512 2:1024 4:2048"`.
 
 
+## Как нас видит DPI/ТСПУ
+
+Стенд [`dpi-bench/`](dpi-bench/README.md) воспроизводит опубликованные методы обнаружения VPN: сигнатуры первого пакета, правило «полностью зашифрованный трафик» (FET), длины первых пакетов, пульс простоя, ACK-эхо, длины mod 16 и активные зонды, плюс пять политик блокировки.
+
+| Признаков из 7 (меньше — лучше) | KS | CITP | CITP + CBR | WireGuard | OpenVPN | HTTPS (эталон) |
+|---|---|---|---|---|---|---|
+| До исправлений | 2 | 2 | 1 | 5 | 2 | 0 |
+| После (ветка Beta) | **1** | **0** | **0** | — | — | — |
+
+| Политика | KS | CITP |
+|---|---|---|
+| Без блокировок | ✅ | ✅ |
+| UDP заблокирован / бан IP за UDP | ❌ | ✅ |
+| Открыты только порты < 1000 | ❌ | ✅ (443) |
+| Заморозка после 16 КБ | ❌ | ❌ |
+
+Что исправлено: у KS — устойчивость к сбитым часам (±30 с вместо ±8 с), разворачивание окна ключей при промахе, паддинг мелких пакетов против ACK-эха (`-pad`); у CITP — подпор потока вместо обрыва на больших загрузках (50 → 133 Мбит/с в лаборатории), случайный keepalive и время закрытия зонда, заголовок TLS-записи перед hello (`-tlsrec`), сервер слушает 443 и 9443. Подробно: [`docs/dpi/`](docs/dpi/), [`docs/KS-REVIEW-2026-10.md`](docs/KS-REVIEW-2026-10.md).
+
+Живая проверка (Россия → зарубежный сервер): все шесть протоколов прошли 56/56 загрузок, вмешательства сети не видно.
+
+> Это модель по открытым публикациям, а не настоящий ТСПУ. Полноценный разбор TLS увидит, что за заголовком CITP не TLS. Запуск у себя: `cd dpi-bench && sudo ./lab.sh all` (~50 мин).
+
 ## Сборка
 
 Нужен Go ≥ 1.26.
@@ -154,6 +176,7 @@ MIT: [LICENSE](LICENSE). Сторонние компоненты (Wintun, .NET, 
 - **Per-user ports and keys:** each user has their own port and key, both on the entry node and on the relay to the exit node.
 - **Own server:** `make setup && ./bin/chameleon-setup` asks 8 questions (node addresses, ports `auto`/`default`/custom, user count, domain). It then replaces every placeholder in the repo and writes ready-to-run commands to `.chameleon-setup/RUN.md`.
 - **Benchmark:** `./bench/bench.sh` runs a speed comparison, max users per server size, and speed vs. user count. It saves a checkpoint after every step.
+- **DPI benchmark:** `dpi-bench/` reproduces published VPN-detection methods (signatures, fully-encrypted-traffic rule, idle heartbeat, ACK echo, active probes) and five blocking policies. Detectable traits out of 7: KS 2→1, CITP 2→0 after the Beta fixes (WireGuard 5, OpenVPN 2, HTTPS 0). CITP survives UDP blocking and "ports < 1000 only" on port 443. This is a model, not the real TSPU.
 - **Testers wanted:** open an issue labelled `tester` with your city, ISP and device, and we will send you a key.
 
 License: MIT.

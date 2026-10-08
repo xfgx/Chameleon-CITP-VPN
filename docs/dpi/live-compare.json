@@ -1,0 +1,104 @@
+{
+ "ks": {
+  "client_pkts": 24513,
+  "server_pkts": 25520,
+  "up_loss_pct": 0.0,
+  "down_loss_pct": 4.38,
+  "injected_to_server": 239,
+  "injected_to_client": 0,
+  "bulk_max_gap_s": 0.13,
+  "result": {
+   "ok": 56,
+   "fail": 0,
+   "bytes": 21301274,
+   "bulk_mbps": 15.99
+  },
+  "client_capture_missed": 783
+ },
+ "citp": {
+  "client_pkts": 7807,
+  "server_pkts": 6908,
+  "up_bytes_client": 30655,
+  "up_bytes_server": 30713,
+  "down_bytes_server": 24475325,
+  "down_bytes_client": 19405761,
+  "up_delivered_pct": 100.2,
+  "down_delivered_pct": 79.3,
+  "bulk_max_gap_s": 0.12,
+  "result": {
+   "ok": 56,
+   "fail": 0,
+   "bytes": 21301274,
+   "bulk_mbps": 44.98
+  },
+  "client_capture_missed": 689
+ },
+ "citp-cbr": {
+  "client_pkts": 9151,
+  "server_pkts": 7866,
+  "up_bytes_client": 68044,
+  "up_bytes_server": 68447,
+  "down_bytes_server": 23742792,
+  "down_bytes_client": 20194063,
+  "up_delivered_pct": 100.6,
+  "down_delivered_pct": 85.1,
+  "bulk_max_gap_s": 0.13,
+  "result": {
+   "ok": 56,
+   "fail": 0,
+   "bytes": 21301274,
+   "bulk_mbps": 47.8
+  },
+  "client_capture_missed": 470
+ },
+ "wg": {
+  "client_pkts": 23997,
+  "server_pkts": 24557,
+  "up_loss_pct": 0.07,
+  "down_loss_pct": 3.21,
+  "injected_to_server": 45,
+  "injected_to_client": 0,
+  "bulk_max_gap_s": 0.13,
+  "result": {
+   "ok": 56,
+   "fail": 0,
+   "bytes": 21301274,
+   "bulk_mbps": 33.91
+  },
+  "client_capture_missed": 135
+ },
+ "ovpn": {
+  "client_pkts": 23548,
+  "server_pkts": 24171,
+  "up_loss_pct": 0.0,
+  "down_loss_pct": 3.43,
+  "injected_to_server": 72,
+  "injected_to_client": 0,
+  "bulk_max_gap_s": 0.13,
+  "result": {
+   "ok": 56,
+   "fail": 0,
+   "bytes": 21301274,
+   "bulk_mbps": 18.91
+  },
+  "client_capture_missed": 216
+ },
+ "tls": {
+  "client_pkts": 8606,
+  "server_pkts": 7201,
+  "up_bytes_client": 41806,
+  "up_bytes_server": 41806,
+  "down_bytes_server": 22838012,
+  "down_bytes_client": 19910147,
+  "up_delivered_pct": 100.0,
+  "down_delivered_pct": 87.2,
+  "bulk_max_gap_s": 0.14,
+  "result": {
+   "ok": 56,
+   "fail": 0,
+   "bytes": 21301274,
+   "bulk_mbps": 49.34
+  },
+  "client_capture_missed": 544
+ }
+}

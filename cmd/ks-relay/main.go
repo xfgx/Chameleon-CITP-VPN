@@ -220,6 +220,7 @@ func send(se *session, plain []byte) {
 		cNoPeer.Add(1)
 		return
 	}
+	se.tx.SetOffset(se.rx.Offset())
 	se.tx.TickEpoch(time.Now())
 	w := se.tx.Seal(plain)
 	if _, err := se.conn.WriteToUDP(w, peer); err != nil {

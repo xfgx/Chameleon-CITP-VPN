@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mrand "math/rand"
 	"net"
 	"time"
 )
@@ -43,6 +44,16 @@ const (
 	replayTTL       = 2 * authClockSkew
 	handshakeTimout = 15 * time.Second
 )
+
+// ClientTLSRecord — клиент предваряет 104-байтовый hello 5-байтовым
+// заголовком TLS-записи Handshake (16 03 01 00 68). Правило «полностью
+// зашифрованного трафика» (Wu et al., USENIX Sec 2023; исключение Ex5)
+// пропускает соединения, чьи первые байты совпадают с TLS. Это НЕ
+// TLS-мимикрия: TLS-парсер увидит мусор вместо ClientHello. Сервер
+// принимает оба вида (см. ServerHandshake), поэтому старые клиенты работают.
+var ClientTLSRecord = false
+
+var tlsRecHdr = [5]byte{0x16, 0x03, 0x01, byte(clientHelloLen >> 8), byte(clientHelloLen & 0xff)}
 
 // ErrAuth — рукопожатие не аутентифицировано (зонд/мусор/replay).
 // Сервер в этом случае обязан молчать (см. Blackhole).
@@ -146,6 +157,9 @@ func ClientHandshake(c net.Conn, serverPub *ecdh.PublicKey, clientPriv *ecdh.Pri
 		return nil, err
 	}
 	hello := append(append([]byte{}, ecPub...), sealed...)
+	if ClientTLSRecord {
+		hello = append(tlsRecHdr[:], hello...)
+	}
 	if _, err := c.Write(hello); err != nil {
 		return nil, fmt.Errorf("send client hello: %w", err)
 	}
@@ -180,11 +194,21 @@ func ClientHandshake(c net.Conn, serverPub *ecdh.PublicKey, clientPriv *ecdh.Pri
 // (nil/пустой = принимать всех, кто знает ключ ноды). При успехе
 // возвращает также публичный ключ клиента (для журнала).
 func ServerHandshake(c net.Conn, staticPriv *ecdh.PrivateKey, allowlist map[[32]byte]bool) (*Session, []byte, error) {
-	_ = c.SetDeadline(time.Now().Add(handshakeTimout))
+	// случайный 10..20 с: ровные 15.0 с были отпечатком (зонд «молчание»)
+	_ = c.SetDeadline(time.Now().Add(handshakeTimout*2/3 + time.Duration(mrand.Int63n(int64(handshakeTimout*2/3)))))
 	defer c.SetDeadline(time.Time{})
 
 	hello := make([]byte, clientHelloLen)
-	if _, err := io.ReadFull(c, hello); err != nil {
+	if _, err := io.ReadFull(c, hello[:len(tlsRecHdr)]); err != nil {
+		return nil, nil, fmt.Errorf("recv client hello: %w", err)
+	}
+	if [5]byte(hello[:5]) == tlsRecHdr {
+		// клиент с TLS-заголовком: hello целиком следует за ним. Случайный
+		// hello старого клиента совпадает с этими 5 байтами с вероятностью 2^-40.
+		if _, err := io.ReadFull(c, hello); err != nil {
+			return nil, nil, fmt.Errorf("recv client hello: %w", err)
+		}
+	} else if _, err := io.ReadFull(c, hello[len(tlsRecHdr):]); err != nil {
 		return nil, nil, fmt.Errorf("recv client hello: %w", err)
 	}
 	ecPub, err := ecdh.X25519().NewPublicKey(hello[:32])
@@ -267,6 +291,17 @@ func transcript(ecPub, clientPayload, serverPayload []byte) []byte {
 // или не истечёт таймаут. Ресурсно дёшево (io.Copy в Discard),
 // а зондирующему жжёт время и не даёт никакой информации.
 func Blackhole(c net.Conn, maxHold time.Duration) {
-	_ = c.SetDeadline(time.Now().Add(maxHold))
+	_ = c.SetDeadline(time.Now().Add(blackholeHold(maxHold)))
 	_, _ = io.Copy(io.Discard, c)
+}
+
+// blackholeHold — случайное время держания в [35%, 100%] от maxHold.
+// Фиксированные 45 с (и 15 с таймаута рукопожатия) давали стабильное время
+// закрытия — отпечаток для активного зондирования (бенчмарк D7, 2026-10-08).
+func blackholeHold(maxHold time.Duration) time.Duration {
+	if maxHold <= 0 {
+		return maxHold
+	}
+	lo := maxHold * 35 / 100
+	return lo + time.Duration(mrand.Int63n(int64(maxHold-lo)+1))
 }
