@@ -241,9 +241,21 @@ func newKsEpochSink(master []byte, epoch uint64, dir string) *ksEpochSink {
 	}
 }
 
-// fill — скользящее окно ожидаемых позиций: держим window впереди поглощённых.
+// ksLazyAhead — сколько позиций держим впереди поглощённых в начале эпохи.
+// Окно растёт вместе с трафиком (used + ksLazyAhead, но не больше window):
+// у молчащего пользователя (keepalive раз в 2 с) это ~256 позиций вместо
+// 8192 — в ~30 раз меньше памяти и CPU на эпоху; у активного окно
+// дорастает до прежних 8192, поэтому устойчивость к потерям не падает.
+// Байты на проводе и ключевое расписание не меняются (гейт KS-golden).
+const ksLazyAhead = 256
+
+// fill — скользящее окно ожидаемых позиций (ленивое, см. ksLazyAhead).
 func (s *ksEpochSink) fill(window uint64) {
-	for s.gen < s.used+window {
+	ahead := s.used + ksLazyAhead
+	if ahead > window {
+		ahead = window
+	}
+	for s.gen < s.used+ahead {
 		key, nonce := s.kg.next()
 		s.ahead[nonce] = key
 		s.gen++

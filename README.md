@@ -1,139 +1,149 @@
-# Chameleon CITP VPN
+# Chameleon
 
-Chameleon — VPN-клиент и серверная часть для работы в сетях с фильтрацией трафика. Клиент сам выбирает рабочий способ подключения (AUTO), держит соединение при смене сети и не уводит российские сайты в туннель.
+**Бесплатный VPN с открытым кодом, который работает там, где блокируют.**
+Клиенты для Android и Windows, свой сервер ставится за 5 минут.
 
-Текущие версии: **Android 4.6.0**, **Windows 4.6.0**.
+[Скачать](https://github.com/xfgx/Chameleon-CITP-VPN/releases) · [Свой сервер](#свой-сервер-за-5-минут) · [Бенчмарк](#бенчмарк) · [Стать тестером](#нужны-тестеры) · [English](#english)
 
-Новое в 4.6.0 — режим «Российские сайты напрямую» (RU-direct): трафик к российским адресам идёт мимо туннеля с настоящего IP пользователя, остальное — через VPN. Описание — [docs/RU-DIRECT.md](docs/RU-DIRECT.md), заметки к выпуску — [docs/releases/WINDOWS-4.6.0.md](docs/releases/WINDOWS-4.6.0.md).
+---
 
-- Ветка `main` — полный проект: клиенты, ядро, серверы, протокол, инструменты, документация.
-- Ветка `app/chameleon-4.5` — только исходники клиентского приложения 4.5 (Android + Windows + общее ядро).
+## Что это
 
-## Содержание
+- **Одна кнопка.** Режим AUTO сам выбирает транспорт (KS, CITP, ChaosSync), который проходит в вашей сети.
+- **Не похож на VPN.** Нет узнаваемого рукопожатия, длины и тайминги пакетов меняются, на чужие запросы нода молчит.
+- **Свой порт у каждого.** У каждого пользователя свой UDP-порт и свой ключ на RU-ноде и на плече до зарубежного выхода.
+- **Бесплатно и открыто.** Лицензия MIT, без аккаунтов, рекламы и телеметрии.
 
-- [Возможности](#возможности)
-- [Как это устроено](#как-это-устроено)
-- [Структура репозитория](#структура-репозитория)
-- [Сборка](#сборка)
-- [Своя инсталляция](#своя-инсталляция)
-- [Безопасность и приватность](#безопасность-и-приватность)
-- [Что не входит в репозиторий](#что-не-входит-в-репозиторий)
-- [Участие и лицензия](#участие-и-лицензия)
-
-## Возможности
-
-- **AUTO-режим.** Клиент пробует несколько транспортов и держится за тот, который реально проходит в текущей сети. Результаты сеансов учитываются при следующем выборе.
-- **Несколько протоколов.** CITP (TCP, TTLS, WebSocket, CDN-канал), KS (UDP) и ChaosSync. Переключение без действий пользователя.
-- **Раздельная маршрутизация.** Российские адреса идут напрямую, остальное — через VPN.
-- **Аутентифицированный DNS.** Ответы о выборе узла подписываются (канонический MAC v2) и проверяются клиентом; при ошибке проверки тихого отката нет.
-- **Сдержанный фоновый трафик.** Маскирующий трафик ограничен по объёму и времени.
-- **Обновления внутри приложения.** Вкладка «Обновления» на Android и Windows сверяет SHA-256 пакета перед установкой.
-- **Минимум данных.** Телеметрия — только технические счётчики без содержимого трафика и адресов назначения.
-
-## Как это устроено
+## Как устроено
 
 ```
- Клиент (Android / Windows)
-   │  CITP / KS / ChaosSync, выбор AUTO
-   ▼
- Входной узел ── цепочка CITP ──► Выходной узел ──► Интернет
-   ▲
-   │  подписанные ответы о выборе узла (DNS v2), бюллетень состояния сети
+ Клиент ──KS/UDP──► RU-нода ──ks-relay──► Выход за рубежом ──► Интернет
+ (Android,          порт = база+слот      порт = база+слот,
+  Windows)          (ks-hub)              свой ключ и адрес
 ```
 
-- Клиент получает адреса и ключи узлов из **личного ключа доступа**, поэтому в коде приложения их нет.
-- Входной узел принимает клиентов, выходной выпускает трафик в интернет; между ними — аутентифицированная цепочка.
-- Спецификация протокола: [`protocol/overview.md`](protocol/overview.md), [`protocol/wire-format.md`](protocol/wire-format.md), [`protocol/dns-binding.md`](protocol/dns-binding.md), инварианты — [`protocol/INVARIANTS.md`](protocol/INVARIANTS.md).
+1. Клиент подключается к RU-ноде на свой персональный порт `USER_PORTBASE + слот` (общий порт хаба тоже работает).
+2. RU-нода передаёт трафик пользователя на выход по своему сеансу `ks-relay`: отдельный порт `RELAY_PORTBASE + слот` и отдельный ключ `HMAC(master, слот)`.
+3. Выход сам устанавливает сеансы к RU-ноде, поэтому ему не нужны входящие порты.
 
-> **Совместимость.** DNS-аутентификация v2 не принимает старые MAC. Клиенты и все узлы цепочки (входной и выходной) обновляются вместе.
+## Быстрый старт (пользователю)
 
-## Структура репозитория
-
-| Каталог | Что внутри |
+| Платформа | Что сделать |
 |---|---|
-| `android/` | Приложение Android (Kotlin, VpnService), Gradle-проект |
-| `desktop/Chameleon.Windows/` | Интерфейс Windows (WPF, .NET 10) |
-| `mobilecore/` | Ядро для Android (gomobile): туннель, AUTO, раздельная маршрутизация |
-| `cmd/chamd/` | Служба-ядро Windows: брокер, Wintun, AUTO, DNS |
-| `cmd/cham-server/`, `cmd/cham-client/`, `cmd/cham-keygen/` | Сервер и консольный клиент CITP, генерация ключей |
-| `cmd/ks-vpn/`, `cmd/ks-hub/`, `cmd/ks-admin/` | Протокол KS: клиент, хаб, консоль управления |
-| `cmd/chaossync-*` | Сервер, клиент и самопроверка ChaosSync |
-| `cmd/cdt-*` | Экспериментальный транспорт CDT и утилиты к нему |
-| `cmd/vpn-web/`, `cmd/vpn-observer/`, `cmd/chaos-metrics/` | Сайт активации, наблюдатель за доступностью, метрики |
-| `internal/` | Общие библиотеки: `chameleon` (CITP), `chaossync`, `rudirect` (списки RU-direct), активация, IPC, телеметрия |
-| `protocol/` | Спецификации, модель угроз, TLA+-модели, эталонный парсер |
-| `docs/` | Описание подсистем (CDT, KS, ChaosSync, метрики), заметки к выпускам |
-| `packaging/` | Установщик NSIS, лицензии сторонних компонентов |
-| `scripts/` | Сборка релизов и проверки безопасности |
-| `services/` | Примеры systemd-юнитов и бот выдачи ключей |
-| `tools/` | Диагностика и лабораторные утилиты (fieldtest, probe, профилировщик, `ru-direct/gen.py` — генератор списков RU-direct и др.) |
-| `workers/cham-bridge/` | Cloudflare Worker — WebSocket-мост к узлу |
-| `test/e2e/` | Сквозные тесты |
-| `examples/` | Примеры конфигураций клиента и сервера |
+| Android | Установите APK из [Releases](https://github.com/xfgx/Chameleon-CITP-VPN/releases), вставьте ключ, нажмите «Подключить» |
+| Windows | Запустите установщик `Chameleon-Setup.exe`, вставьте ключ, нажмите «Подключить» |
+
+Ключ выдаёт владелец сервера. Если у вас своего сервера нет, загляните в раздел «[Нужны тестеры](#нужны-тестеры)».
+
+## Свой сервер за 5 минут
+
+Нужны две Linux-машины: RU-нода (вход) и зарубежная нода (выход). Подойдут VPS с 1 vCPU и 1 ГБ RAM.
+
+```bash
+git clone https://github.com/xfgx/Chameleon-CITP-VPN chameleon && cd chameleon
+make setup && ./bin/chameleon-setup        # Windows: bin\chameleon-setup.exe
+```
+
+`chameleon-setup` задаст 8 вопросов:
+
+| Вопрос | Варианты |
+|---|---|
+| Адрес RU-ноды | IP или домен (на самой ноде определяется автоматически) |
+| Адрес выхода | IP или домен |
+| IP для админки | через запятую |
+| Порт хаба | `auto` (свободный случайный) / `default` (51830) / число |
+| Максимум пользователей | 1–4000 |
+| Персональные порты пользователей | `auto` (56000+слот) / `off` / база |
+| Порты плеча RU↔выход | `auto` (52000+слот) / база |
+| Домен и бот активации | можно пропустить |
+
+Мастер заменит в репозитории все заглушки (`192.0.2.10`, `198.51.100.10`, `vpn.example.com`, `<REDACTED>` …) на ваши значения и создаст:
+
+- `.env.chameleon` — все параметры;
+- `secrets/relay-master.key` — ключ плеча (0600, в git не попадает);
+- `.chameleon-setup/RUN.md` — готовые команды запуска для обеих нод.
+
+Оригиналы файлов сохраняются в `.chameleon-setup/backup/`. Откатить: `chameleon-setup -undo`. Посмотреть изменения без записи: `-dry-run`. Без вопросов (CI): `-answers answers.json -yes`.
+
+## Бенчмарк
+
+```bash
+./bench/bench.sh            # меню: 1 скорость · 2 пользователи/ресурсы · 3 скорость/число пользователей
+./bench/bench.sh status     # какие чекпоинты пройдены
+```
+
+Каждый шаг сохраняет чекпоинт. После обрыва бенчмарк продолжит с того же места. Подробно: [bench/README.md](bench/README.md).
+
+### Результаты (RU-нода 2 vCPU / 2 ГБ, хаб ограничен 1 vCPU и 700 МБ)
+
+10 % пользователей активны (20 пакетов/с по 1000 Б), остальные шлют keepalive. Базовый RTT до ноды 125 мс. В ячейке: сколько пользователей на связи и p95 RTT.
+
+| Пользователей | ks-hub 2 (было) | ks-hub 3, общий порт | ks-hub 3, свой порт |
+|---|---|---|---|
+| 100 | 100 · 165 мс | 100 · 218 мс | **100 · 178 мс** |
+| 300 | 300 · 1,3 с | 300 · 2,6 с¹ | **300 · 0,7 с** |
+| 500 | 500 · 3,1 с | 500 · 1,8 с | 500 · 1,9 с |
+| 700 | 699 · 5,8 с | 700 · 3,4 с | 700 · 3,5 с |
+| 1000 | **отказ** (0 на связи) | 1000 · 10,7 с, потери 16 % | 898 · 9,6 с, потери 52 % |
+| Пик RAM при 1000 | — | 125 МБ | 145 МБ |
+
+¹ Во время этой ступени на машине-генераторе шла сборка, поэтому замер завышен.
+
+Итог: одно ядро комфортно держит **~300 пользователей** (p95 < 0,7 с со своими портами). До 700 пользователей все остаются на связи, но задержка растёт. На 1000 хаб 3 больше не падает целиком, как хаб 2. Узкое место — CPU хаба (очередь приёма переполняется), памяти хватает с запасом. Больше пользователей — больше ядер: `bench.sh capacity` с `PROFILES="1:512 2:1024 4:2048"`.
+
 
 ## Сборка
 
-Требования: Go 1.26+, для Android — gomobile, Android SDK 34 и Gradle 8.7, для Windows — .NET 10 SDK и NSIS 3.
+Нужен Go ≥ 1.26.
 
 ```bash
-git clone <repository-url> chameleon && cd chameleon
-
-# всё Go-ядро, серверы и утилиты
-go build ./...
-go vet ./...
-go test ./internal/... ./cmd/... ./mobilecore
-
-# сервер для Linux
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '-s -w' ./cmd/cham-server
-
-# ядро Windows
-GOOS=windows GOARCH=amd64 go build -trimpath -ldflags '-H=windowsgui' ./cmd/chamd
-
-# Android: библиотека ядра + APK
-gomobile bind -target=android -androidapi 23 -o android/app/libs/mobilecore.aar ./mobilecore
-cd android && gradle assembleRelease
-
-# интерфейс Windows
-dotnet publish desktop/Chameleon.Windows -c Release -r win-x64
+make setup          # мастер настройки → bin/chameleon-setup и bin/chameleon-setup.exe
+make node           # ks-hub и ks-relay для нод → bin/
+make bench-tools    # + генератор нагрузки ks-stress
+make build test     # сборка и тесты всех пакетов
 ```
 
-`make build`, `make test`, `make vet` и `make security` делают то же самое через Makefile. APK и установщик подписываются вашими собственными ключами — в репозитории их нет.
+Подробная инструкция по сборке и установке всех компонентов (CITP-нода, клиенты, ключи): [docs/README-FULL.md](docs/README-FULL.md).
 
-## Своя инсталляция
+Android: `gomobile bind -target=android/arm64 -o android/app/libs/mobilecore.aar ./mobilecore`, затем `cd android && ./gradlew assembleRelease`.
 
-Все адреса, порты, ключи и токены реальной инсталляции заменены заглушками; логика кода не менялась.
+## Что где лежит
 
-| Заглушка | Где | Что указать |
-|---|---|---|
-| `vpn.example.com` | `internal/clientactivation`, `cmd/chamd`, `android/…`, `desktop/…` | домен сайта активации и обновлений |
-| `your_activation_bot` | `desktop/…`, `packaging/windows/*.txt` | Telegram-бот выдачи ключей |
-| `203.0.113.x`, `your-node.example.com` | тесты, `examples/` | адреса ваших узлов |
-| `<port>` в документации, `ksprobe.Port`, `PortBase` ChaosSync | `docs/`, `internal/ksprobe`, `internal/chaossync` | порты ваших узлов |
-| `<ws-token>`, `your-account` | `workers/cham-bridge/wrangler.toml` | токен WS-фронта узла и аккаунт Cloudflare |
+| Путь | Что это |
+|---|---|
+| `android/`, `desktop/`, `cmd/chamd` | Клиенты Android и Windows |
+| `cmd/ks-hub` | Хаб клиентов на RU-ноде (общий и персональные порты) |
+| `cmd/ks-relay` | Плечо RU-нода ↔ выход, по сеансу на пользователя |
+| `cmd/cham-server` | Нода CITP |
+| `cmd/chameleon-setup` | Мастер настройки |
+| `cmd/ks-stress`, `bench/` | Нагрузочный генератор и бенчмарк |
+| `internal/`, `mobilecore/` | Ядро протоколов |
+| `docs/`, `protocol/` | Документация и спецификации |
 
-Быстрый старт сервера:
+## Безопасность
 
-```bash
-cham-server -genkey -keyfile server.key   # ключ узла (покажет публичный ключ)
-cham-server -keyfile server.key -allowfile clients.txt -listen 0.0.0.0:<port>
-```
+Модель угроз: [THREAT_MODEL.md](THREAT_MODEL.md). Как сообщить об уязвимости: [SECURITY.md](SECURITY.md). Ключи создаются только локально и не попадают в репозиторий.
 
-Пример конфигурации — [`examples/server.example.yaml`](examples/server.example.yaml), клиента — [`examples/client.example.json`](examples/client.example.json).
+## Нужны тестеры
 
-## Безопасность и приватность
+Нужны люди из разных городов и у разных провайдеров: мобильный интернет, домашний, офисный Wi-Fi. Оставьте [issue с шаблоном «Тестер»](https://github.com/xfgx/Chameleon-CITP-VPN/issues/new?labels=tester&title=%D0%A2%D0%B5%D1%81%D1%82%D0%B5%D1%80) и укажите город, провайдера и устройство. Мы пришлём ключ. В ответ просим рассказать, что сработало, а что нет.
 
-- Модель угроз: [`THREAT_MODEL.md`](THREAT_MODEL.md) и [`protocol/security/`](protocol/security).
-- Сообщить об уязвимости: [`SECURITY.md`](SECURITY.md). Пожалуйста, не публикуйте детали в открытых issue.
-- Секреты в репозиторий не коммитятся; проверка — `make security` (gitleaks + govulncheck).
-- CI в GitHub Actions только собирает и тестирует код на стандартных раннерах GitHub; доступа к серверам проекта у него нет.
+Свои предложения присылайте через Pull Request, см. [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Что не входит в репозиторий
+## Лицензия
 
-- приватные и публичные ключи узлов, токены, пароли, ключи подписи;
-- реальные IP-адреса, домены, порты и пути серверов;
-- скрипты развёртывания на конкретные серверы, рабочие журналы, сырые результаты экспериментов;
-- собранные бинарные файлы и сторонние библиотеки (`.jar`, `.aar`, `.dll`).
+MIT: [LICENSE](LICENSE). Сторонние компоненты (Wintun, .NET, Go-модули) распространяются под своими лицензиями: [packaging/THIRD-PARTY-NOTICES.txt](packaging/THIRD-PARTY-NOTICES.txt).
 
-## Участие и лицензия
+---
 
-Как предложить изменения — [`CONTRIBUTING.md`](CONTRIBUTING.md). Лицензия — MIT, см. [`LICENSE`](LICENSE), примечания — [`LICENSE-NOTICE.md`](LICENSE-NOTICE.md) и [`packaging/THIRD-PARTY-NOTICES.txt`](packaging/THIRD-PARTY-NOTICES.txt).
+## English
+
+**Chameleon is a free, open-source VPN built to work where VPNs get blocked.** It has Android and Windows clients, and you can set up your own server in 5 minutes.
+
+- **One button:** AUTO mode picks the transport (KS, CITP, ChaosSync) that gets through on the current network.
+- **Per-user ports and keys:** each user has their own port and key, both on the entry node and on the relay to the exit node.
+- **Own server:** `make setup && ./bin/chameleon-setup` asks 8 questions (node addresses, ports `auto`/`default`/custom, user count, domain). It then replaces every placeholder in the repo and writes ready-to-run commands to `.chameleon-setup/RUN.md`.
+- **Benchmark:** `./bench/bench.sh` runs a speed comparison, max users per server size, and speed vs. user count. It saves a checkpoint after every step.
+- **Testers wanted:** open an issue labelled `tester` with your city, ISP and device, and we will send you a key.
+
+License: MIT.

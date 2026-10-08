@@ -34,7 +34,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -53,10 +52,9 @@ import (
 )
 
 const (
-	hubVersion = "ks-hub/2-v6 (2026-09-18)"
-	hubV6Pool  = "2001:db8:1::/52"
+	hubVersion = "ks-hub/3-ports (2026-10-08)"
 	slotMin    = 11
-	slotMax    = 250
+	slotCap    = 4000 // верхний предел октета/номера слота при широкой сети (/16 и т.п.)
 	datchCap   = 8192
 	outqCap    = 4096
 )
@@ -84,7 +82,9 @@ type user struct {
 	name  string
 	slot  int
 	inner net.IP
-	v6net  *net.IPNet
+	v6net *net.IPNet
+	port  int                         // персональный UDP-порт (0 = только общий порт)
+	conn  atomic.Pointer[net.UDPConn] // сокет, на котором пользователь услышан последним
 
 	master []byte
 
@@ -117,11 +117,14 @@ func (u *user) open(wire []byte) ([]byte, bool) {
 type table struct {
 	users   []*user
 	byInner map[string]*user
+	bySlot  map[int]*user
 }
 
 type inPkt struct {
 	data []byte
 	src  *net.UDPAddr
+	conn *net.UDPConn
+	slot int // >0: датаграмма пришла на персональный порт этого слота — без перебора
 }
 
 type outPkt struct {
@@ -145,6 +148,12 @@ var (
 	maxUsersN  int
 	statusFile string
 	nWorkers   int
+	portBase   int
+	slotMax    int
+	hubV6Pool  string
+
+	portMu    sync.Mutex
+	portSocks = map[int]*net.UDPConn{}
 
 	tab      atomic.Pointer[table]
 	srcCache sync.Map
@@ -161,6 +170,8 @@ func main() {
 	rotT := flag.Uint64("T", 8, "период ротации эпох, сек (обязан совпадать с клиентами)")
 	workers := flag.Int("workers", 0, "воркеров на направление (0 = по числу ядер)")
 	idle := flag.Int64("idle", 300, "сек тишины, после которых выученный адрес клиента не используется")
+	pbase := flag.Int("portbase", 0, "персональные порты: пользователь слота N слушается на UDP portbase+N (0 = выкл.; общий -listen работает всегда)")
+	v6pool := flag.String("v6pool", "2001:db8:1::/52", "IPv6-пул хаба (/52; /64 на слот)")
 	maxU := flag.Int("maxusers", 64, "предел числа пользователей (окно приёма ~1-2 МБ на человека)")
 	allow := flag.Bool("allowpeers", false, "разрешить клиентам видеть друг друга внутри туннельной сети")
 	status := flag.String("status", "/run/ks-hub/status.json", "файл состояния для админ-скриптов (пусто = не писать)")
@@ -180,6 +191,17 @@ func main() {
 		log.Fatal("fail-closed: -innerself должен быть IPv4")
 	}
 	innerNet = ipnet
+	ones, bits := ipnet.Mask.Size()
+	hosts := 1<<uint(bits-ones) - 2
+	slotMax = hosts
+	if slotMax > slotCap {
+		slotMax = slotCap
+	}
+	portBase = *pbase
+	if portBase > 0 && portBase+slotMax > 65535 {
+		log.Fatalf("fail-closed: -portbase %d + слотов %d > 65535", portBase, slotMax)
+	}
+	hubV6Pool = *v6pool
 	innerBcast = broadcastOf(ipnet)
 	if _, hubV6Net, err = net.ParseCIDR(hubV6Pool); err != nil {
 		log.Fatalf("fail-closed: IPv6 pool %s: %v", hubV6Pool, err)
@@ -216,6 +238,7 @@ func main() {
 		log.Fatalf("fail-closed: слушатель UDP :%d: %v", *listen, err)
 	}
 	sock = sk
+	syncPortSocks(t)
 
 	log.Printf("%s: TUN %s %s, слушаю UDP :%d, воркеров %d, изоляция клиентов %v, эпоха T=%d",
 		hubVersion, ifname, *inner, *listen, nWorkers, !allowPeer, epochT)
@@ -229,7 +252,7 @@ func main() {
 		go ingestWorker()
 	}
 
-	go udpReader()
+	go udpReader(sock, 0)
 	go statusLoop()
 	go logLoop()
 	go signalLoop()
@@ -248,6 +271,7 @@ func loadTable(prev *table) (*table, error) {
 		return nil, err
 	}
 	byInner := make(map[string]*user)
+	bySlot := make(map[int]*user)
 	var users []*user
 	seen := make(map[int]string)
 	for _, e := range ents {
@@ -290,12 +314,18 @@ func loadTable(prev *table) (*table, error) {
 			}
 		}
 		u.v6net = v6net
+		if portBase > 0 {
+			u.port = portBase + slot
+		} else {
+			u.port = 0
+		}
 		seen[slot] = e.Name()
+		bySlot[slot] = u
 		users = append(users, u)
 		byInner[string(in.To4())] = u
 	}
 	sort.Slice(users, func(i, j int) bool { return users[i].slot < users[j].slot })
-	return &table{users: users, byInner: byInner}, nil
+	return &table{users: users, byInner: byInner, bySlot: bySlot}, nil
 }
 
 func reuse(prev *table, slot int, name string, master []byte) *user {
@@ -310,14 +340,25 @@ func reuse(prev *table, slot int, name string, master []byte) *user {
 	return nil
 }
 
+// innerFor — адрес слота: база сети + номер слота (для /24 это последний
+// октет, как раньше; для более широкой сети — сквозная нумерация).
 func innerFor(slot int) net.IP {
 	b := innerNet.IP.To4()
-	return net.IPv4(b[0], b[1], b[2], byte(slot)).To4()
+	v := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	v += uint32(slot)
+	return net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v)).To4()
 }
 
 func v6NetFor(slot int) *net.IPNet {
-	_, n, _ := net.ParseCIDR(fmt.Sprintf("2001:db8:1:%04x::/64", slot))
-	return n
+	_, pool, err := net.ParseCIDR(hubV6Pool)
+	if err != nil || slot >= 4096 {
+		return nil
+	}
+	ip := make(net.IP, 16)
+	copy(ip, pool.IP.To16())
+	ip[6] |= byte(slot >> 8)
+	ip[7] |= byte(slot)
+	return &net.IPNet{IP: ip, Mask: net.CIDRMask(64, 128)}
 }
 
 func userForV6(t *table, ip net.IP) *user {
@@ -365,6 +406,7 @@ func reload() {
 		return
 	}
 	tab.Store(nt)
+	syncPortSocks(nt)
 	live := make(map[*user]bool, len(nt.users))
 	for _, u := range nt.users {
 		live[u] = true
@@ -381,17 +423,47 @@ func reload() {
 
 // --- провод -> TUN ---------------------------------------------------------
 
-func udpReader() {
+// syncPortSocks — открыть персональные порты новых слотов и закрыть порты
+// удалённых. Вызывается при старте и на SIGHUP (под tabMu или до запуска).
+func syncPortSocks(t *table) {
+	if portBase <= 0 || t == nil {
+		return
+	}
+	portMu.Lock()
+	defer portMu.Unlock()
+	for slot, c := range portSocks {
+		if _, ok := t.bySlot[slot]; !ok {
+			c.Close()
+			delete(portSocks, slot)
+			log.Printf("порт %d (слот %d) закрыт", portBase+slot, slot)
+		}
+	}
+	for slot := range t.bySlot {
+		if _, ok := portSocks[slot]; ok {
+			continue
+		}
+		c, err := net.ListenUDP("udp", &net.UDPAddr{Port: portBase + slot})
+		if err != nil {
+			log.Printf("персональный порт %d (слот %d): %v — пользователь доступен только на общем порту", portBase+slot, slot, err)
+			continue
+		}
+		_ = c.SetReadBuffer(1 << 20)
+		portSocks[slot] = c
+		go udpReader(c, slot)
+	}
+}
+
+func udpReader(c *net.UDPConn, slot int) {
 	buf := make([]byte, 2048)
 	for {
-		n, src, err := sock.ReadFromUDP(buf)
+		n, src, err := c.ReadFromUDP(buf)
 		if err != nil {
 			return
 		}
 		d := make([]byte, n)
 		copy(d, buf[:n])
 		select {
-		case datch <- inPkt{d, src}:
+		case datch <- inPkt{d, src, c, slot}:
 		default:
 			cQFull.Add(1)
 		}
@@ -411,6 +483,7 @@ func ingestWorker() {
 			continue
 		}
 		u.peer.Store(p.src)
+		u.conn.Store(p.conn)
 		u.lastRx.Store(time.Now().Unix())
 		u.pktIn.Add(1)
 		u.byteIn.Add(uint64(len(plain)))
@@ -426,6 +499,17 @@ func ingestWorker() {
 func demux(p inPkt) (*user, []byte) {
 	t := tab.Load()
 	if t == nil {
+		return nil, nil
+	}
+	if p.slot > 0 {
+		// персональный порт: владелец известен заранее, перебора нет (O(1))
+		u := t.bySlot[p.slot]
+		if u == nil {
+			return nil, nil
+		}
+		if plain, ok := u.open(p.data); ok {
+			return u, plain
+		}
 		return nil, nil
 	}
 	key := p.src.String()
@@ -555,7 +639,11 @@ func sealWorker(q chan outPkt) {
 		}
 		u.tx.TickEpoch(time.Now())
 		wire := u.tx.Seal(p.data)
-		if _, err := sock.WriteToUDP(wire, peer); err != nil {
+		c := u.conn.Load()
+		if c == nil {
+			c = sock
+		}
+		if _, err := c.WriteToUDP(wire, peer); err != nil {
 			cSendErr.Add(1)
 			continue
 		}
@@ -625,20 +713,21 @@ func writeStatus() {
 			}
 			list = append(list, map[string]any{
 				"name": u.name, "slot": u.slot, "inner": u.inner.String(), "ipv6": u.v6net.String(),
-				"online": peerFresh(u), "lastRxSec": age, "peer": peer,
+				"online": peerFresh(u), "lastRxSec": age, "peer": peer, "port": u.port,
 				"pktIn": u.pktIn.Load(), "pktOut": u.pktOut.Load(),
 				"bytesIn": u.byteIn.Load(), "bytesOut": u.byteOut.Load(),
 			})
 		}
 	}
 	doc := map[string]any{
-		"version": hubVersion,
-		"time":    time.Now().Format(time.RFC3339),
-		"inner":   innerNet.String(),
-		"self":    selfInner.String(),
-		"workers": nWorkers,
-		"isolate": !allowPeer,
-		"users":   list,
+		"version":  hubVersion,
+		"time":     time.Now().Format(time.RFC3339),
+		"inner":    innerNet.String(),
+		"self":     selfInner.String(),
+		"workers":  nWorkers,
+		"isolate":  !allowPeer,
+		"portBase": portBase,
+		"users":    list,
 		"totals": map[string]any{
 			"tunRead": cTunRead.Load(), "tunWrite": cTunWrite.Load(),
 			"udpRecv": cUdpRecv.Load(), "ingestOK": cIngestOK.Load(),
@@ -672,6 +761,11 @@ func signalLoop() {
 		if sock != nil {
 			sock.Close()
 		}
+		portMu.Lock()
+		for _, c := range portSocks {
+			c.Close()
+		}
+		portMu.Unlock()
 		if tunDev != nil {
 			tunDev.Close()
 		}

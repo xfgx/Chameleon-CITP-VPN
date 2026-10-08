@@ -1,0 +1,33 @@
+name: "Стать тестером / Become a tester"
+description: "Хочу бесплатно тестировать Chameleon и рассказывать, что работает"
+title: "Тестер: <город>, <провайдер>"
+labels: ["tester"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо! После заявки мы пришлём ключ. **Не пишите сюда пароли, ключи и личные данные.**
+  - type: input
+    id: city
+    attributes: {label: "Город / регион", placeholder: "Москва"}
+    validations: {required: true}
+  - type: input
+    id: isp
+    attributes: {label: "Провайдер и тип сети", placeholder: "МТС мобильный 4G / Ростелеком домашний / офисный Wi-Fi"}
+    validations: {required: true}
+  - type: dropdown
+    id: device
+    attributes:
+      label: "Устройство"
+      multiple: true
+      options: ["Android", "Windows 10/11", "Linux (CLI)"]
+    validations: {required: true}
+  - type: dropdown
+    id: other
+    attributes:
+      label: "Что у вас сейчас не работает или работает плохо?"
+      multiple: true
+      options: ["WireGuard", "OpenVPN", "VLESS/Reality", "Shadowsocks", "Ничего не блокируют, хочу просто помочь"]
+  - type: textarea
+    id: notes
+    attributes: {label: "Комментарий", placeholder: "Когда чаще всего режется связь, какие сайты/приложения важны"}

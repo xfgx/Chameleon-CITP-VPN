@@ -62,3 +62,9 @@ activation.token
 
 # Generated Windows resource object
 *.syso
+
+# chameleon-setup / bench
+/.chameleon-setup/
+/bench/bench.env
+/bench/results/
+/bin/

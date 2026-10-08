@@ -1,0 +1,24 @@
+name: "Отчёт тестера / Tester report"
+description: "Как Chameleon работает в вашей сети"
+title: "Отчёт: <город>, <провайдер>, <OK|проблема>"
+labels: ["tester-report"]
+body:
+  - type: input
+    id: net
+    attributes: {label: "Город, провайдер, тип сети"}
+    validations: {required: true}
+  - type: dropdown
+    id: result
+    attributes:
+      label: "Итог"
+      options: ["Работает стабильно", "Работает, но медленно", "Иногда рвётся", "Не подключается"]
+    validations: {required: true}
+  - type: input
+    id: transport
+    attributes: {label: "Какой транспорт выбрал AUTO ", placeholder: "KS / CITP / ChaosSync"}
+  - type: input
+    id: speed
+    attributes: {label: "Скорость (speedtest с VPN / без VPN), Мбит/с", placeholder: "38 / 95"}
+  - type: textarea
+    id: log
+    attributes: {label: "Диагностика", description: "Журнал из приложения или вывод START-KS.cmd. Перед отправкой уберите ключи."}

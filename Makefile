@@ -49,3 +49,21 @@ release:
 
 clean:
 	rm -rf dist
+
+# --- Свой сервер и бенчмарк -------------------------------------------------
+LDF := -trimpath -ldflags "-s -w"
+.PHONY: setup node bench-tools
+
+# Мастер настройки для Linux и Windows → bin/chameleon-setup, bin/chameleon-setup.exe
+setup:
+	CGO_ENABLED=0 $(GO) build $(LDF) -o bin/chameleon-setup ./cmd/chameleon-setup
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(LDF) -o bin/chameleon-setup.exe ./cmd/chameleon-setup
+
+# Бинарники ноды (Linux): хаб клиентов и плечо RU↔выход
+node:
+	CGO_ENABLED=0 GOOS=linux $(GO) build $(LDF) -o bin/ks-hub ./cmd/ks-hub
+	CGO_ENABLED=0 GOOS=linux $(GO) build $(LDF) -o bin/ks-relay ./cmd/ks-relay
+
+# Генератор нагрузки для bench/bench.sh
+bench-tools: node
+	CGO_ENABLED=0 GOOS=linux $(GO) build $(LDF) -o bin/ks-stress ./cmd/ks-stress
