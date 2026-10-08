@@ -1,4 +1,4 @@
-Source repository: <repository-url>
+Source repository: https://github.com/xfgx/Chameleon-CITP-VPN/
 Release branch: feat/free-vpn-production
 Release source archive: Chameleon-4.3.0-source.tar.gz
 Release dependencies archive: Chameleon-4.1.0-go-dependencies.tar.gz
