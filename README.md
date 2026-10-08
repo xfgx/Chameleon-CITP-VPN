@@ -70,6 +70,7 @@ make setup && ./bin/chameleon-setup        # Windows: bin\chameleon-setup.exe
 ```bash
 ./bench/bench.sh            # меню: 1 скорость · 2 пользователи/ресурсы · 3 скорость/число пользователей
 ./bench/bench.sh status     # какие чекпоинты пройдены
+./bench/bench.sh charts     # SVG-графики по результатам → bench/results/<прогон>/charts/
 ```
 
 Каждый шаг сохраняет чекпоинт. После обрыва бенчмарк продолжит с того же места. Подробно: [bench/README.md](bench/README.md).
@@ -78,6 +79,13 @@ make setup && ./bin/chameleon-setup        # Windows: bin\chameleon-setup.exe
 
 10 % пользователей активны (20 пакетов/с по 1000 Б), остальные шлют keepalive. Базовый RTT до ноды 125 мс. В ячейке: сколько пользователей на связи и p95 RTT.
 
+<p>
+<img src="docs/bench/latency.svg" width="49%" alt="Задержка p95"> <img src="docs/bench/online.svg" width="49%" alt="Пользователей на связи">
+<img src="docs/bench/memory.svg" width="49%" alt="Память хаба"> <img src="docs/bench/connect.svg" width="49%" alt="Время подключения">
+</p>
+
+<details><summary>Таблица с цифрами</summary>
+
 | Пользователей | ks-hub 2 (было) | ks-hub 3, общий порт | ks-hub 3, свой порт |
 |---|---|---|---|
 | 100 | 100 · 165 мс | 100 · 218 мс | **100 · 178 мс** |
@@ -85,7 +93,9 @@ make setup && ./bin/chameleon-setup        # Windows: bin\chameleon-setup.exe
 | 500 | 500 · 3,1 с | 500 · 1,8 с | 500 · 1,9 с |
 | 700 | 699 · 5,8 с | 700 · 3,4 с | 700 · 3,5 с |
 | 1000 | **отказ** (0 на связи) | 1000 · 10,7 с, потери 16 % | 898 · 9,6 с, потери 52 % |
-| Пик RAM при 1000 | — | 125 МБ | 145 МБ |
+| Пик RAM при 1000 | 424 МБ | 125 МБ | 145 МБ |
+
+</details>
 
 ¹ Во время этой ступени на машине-генераторе шла сборка, поэтому замер завышен.
 

@@ -19,6 +19,7 @@ scp bin/ks-hub root@<RU-нода>:/opt/chameleon/bench/ks-hub
 | 3 | Скорость и число пользователей | `bench.sh scale` | Суммарная и на пользователя скорость, RTT и потери при `SCALE_LEVELS` активных пользователей | `scale.jsonl` |
 | — | Всё подряд | `bench.sh all` | 1 → 2 → 3 → отчёт | `REPORT.md` |
 | — | Отчёт | `bench.sh report` | Markdown-таблицы по всем собранным данным | `REPORT.md` |
+| — | Графики | `bench.sh charts` | SVG: задержка, доля на связи, память, время подключения | `charts/*.svg`, `charts.html` |
 
 Второй аргумент — имя прогона: `bench.sh capacity vps-2cpu`. По умолчанию это дата.
 

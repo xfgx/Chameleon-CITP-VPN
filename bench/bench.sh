@@ -143,6 +143,25 @@ if s:
 PY
 }
 
+charts(){
+  python3 - "$OUT" "$HERE/charts.py" <<'PY2'
+import json,os,subprocess,sys,collections
+o,ch=sys.argv[1],sys.argv[2]; d=os.path.join(o,"charts"); os.makedirs(d,exist_ok=True)
+groups=collections.OrderedDict()
+for f,key in (("capacity.jsonl",lambda r:f"{r['cores']} vCPU / {r['mem_mb']} МБ"),("scale.jsonl",lambda r:"все активны")):
+    p=os.path.join(o,f)
+    if os.path.exists(p):
+        for l in open(p):
+            r=json.loads(l); groups.setdefault(f[:-6]+": "+key(r),[]).append(r)
+if not groups: sys.exit("нет данных: сначала capacity или scale")
+args=[]
+for i,(k,rows) in enumerate(groups.items()):
+    fn=os.path.join(d,f"s{i}.jsonl"); open(fn,"w").write("".join(json.dumps(r)+"\n" for r in rows)); args.append(f"{k}={fn}")
+subprocess.check_call(["python3",ch,"--series",*args,"--svgdir",d,"--html",os.path.join(d,"charts.html")])
+print("графики:",d)
+PY2
+}
+
 status(){ echo "RUN $RUN ($OUT)"; ls "$ST" 2>/dev/null | sed 's/\.done$//' | sed 's/^/  [x] /'; }
 
 menu(){
@@ -152,18 +171,18 @@ menu(){
     echo " 2) Максимум пользователей при разных ресурсах сервера"
     echo " 3) Скорость при разном числе пользователей"
     echo " 4) Всё по порядку (1→2→3)"
-    echo " 5) Отчёт (results/$RUN/REPORT.md)"
+    echo " 5) Отчёт (results/$RUN/REPORT.md) и графики"
     echo " 6) Состояние чекпоинтов"
     echo " 7) Сбросить чекпоинты прогона"
     echo " 0) Выход"
     read -rp "> " a
-    case $a in 1) speed;; 2) capacity;; 3) scale;; 4) speed; capacity; scale; report;; 5) report;; 6) status;;
+    case $a in 1) speed;; 2) capacity;; 3) scale;; 4) speed; capacity; scale; report;; 5) report; charts;; 6) status;;
       7) rm -rf "$ST" && mkdir -p "$ST" && echo сброшено;; 0) exit 0;; esac
   done
 }
 
 case ${1:-menu} in
-  speed) speed;; capacity) capacity;; scale) scale;; all) speed; capacity; scale; report;;
-  report) report;; status) status;; reset) rm -rf "$ST"; echo "сброшено: $RUN";; menu) menu;;
-  *) echo "usage: $0 [speed|capacity|scale|all|report|status|reset] [RUN_ID]"; exit 2;;
+  speed) speed;; capacity) capacity;; scale) scale;; all) speed; capacity; scale; report; charts;;
+  report) report;; charts) charts;; status) status;; reset) rm -rf "$ST"; echo "сброшено: $RUN";; menu) menu;;
+  *) echo "usage: $0 [speed|capacity|scale|all|report|charts|status|reset] [RUN_ID]"; exit 2;;
 esac
