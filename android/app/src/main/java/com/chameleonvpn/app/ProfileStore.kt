@@ -19,6 +19,11 @@ class ProfileStore(private val context: Context) {
  @Synchronized fun setProtocol(mode:String){require(mode in setOf("auto","citp","ks"));write(read().put("protocol",mode))}
  @Synchronized fun ruDirect():Boolean=read().optBoolean("ru_direct",true)
  @Synchronized fun setRuDirect(enabled:Boolean){write(read().put("ru_direct",enabled))}
+ // Beta: скрытый режим (активируется 8 нажатиями по строке версии) и выбор RU-ноги.
+ @Synchronized fun betaEnabled():Boolean=read().optBoolean("beta_enabled",false)
+ @Synchronized fun setBetaEnabled(enabled:Boolean){write(read().put("beta_enabled",enabled))}
+ @Synchronized fun ruLeg():String=read().optString("ru_leg","standard").let{if(it in setOf("standard","vibecraft")) it else "standard"}
+ @Synchronized fun setRuLeg(leg:String){require(leg in setOf("standard","vibecraft"));write(read().put("ru_leg",leg))}
 
     @Synchronized fun activationSeed():String{val data=read();val old=data.optString("activation_seed");if(old.isNotEmpty())return old;val seed=mobilecore.Mobilecore.genActivationKey();require(seed.isNotEmpty()){ "Не удалось создать ключ установки" };write(data.put("activation_seed",seed));return seed}
     @Synchronized fun activationToken():String=read().optString("activation_token")

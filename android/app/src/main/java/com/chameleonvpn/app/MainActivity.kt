@@ -52,6 +52,12 @@ class MainActivity : Activity() {
  private val protocolButtons=mutableMapOf<String,Button>()
  private lateinit var ruDirectButton:Button
  private var ruDirect=true
+ private lateinit var versionLabel:TextView
+ private lateinit var betaSection:LinearLayout
+ private val ruLegButtons=mutableMapOf<String,Button>()
+ private var beta=false
+ private var ruLeg="standard"
+ private var betaTaps=0
  private lateinit var updateStatus:TextView
  private lateinit var updateDetail:TextView
  private lateinit var updateProgress:ProgressBar
@@ -151,11 +157,11 @@ class MainActivity : Activity() {
  private fun smoothLayout()=LayoutTransition().apply{enableTransitionType(LayoutTransition.CHANGING);setDuration(200);setInterpolator(LayoutTransition.CHANGING,ease)}
  private fun setLabel(view:TextView,value:String){if(view.text.toString()!=value)view.text=value}
  override fun onCreate(savedInstanceState:Bundle?){
-  super.onCreate(savedInstanceState);AppLog.init(this);selected=store.protocol();ruDirect=store.ruDirect();hasKey=store.activationToken().isNotEmpty()
+  super.onCreate(savedInstanceState);AppLog.init(this);selected=store.protocol();ruDirect=store.ruDirect();hasKey=store.activationToken().isNotEmpty();beta=store.betaEnabled();ruLeg=store.ruLeg()
   window.statusBarColor=bg;window.navigationBarColor=bg
   val root=column().apply{setBackgroundColor(bg);fitsSystemWindows=true}
   heading=column().apply{setPadding(dp(20),dp(16),dp(20),dp(12))}
-  heading.add(label("Chameleon",25f,true),0);heading.add(label("Персональный VPN · v${AppUpdater.installedVersion(this)}",14f),2);root.add(heading,0)
+  heading.add(label("Chameleon",25f,true),0);versionLabel=label("Персональный VPN · v${AppUpdater.installedVersion(this)}",14f).apply{isClickable=true;setOnClickListener{onVersionTap()}};heading.add(versionLabel,2);root.add(heading,0)
   // Two rows of two equal tabs: every label fits at any system font size, no baseline shift.
   navigation=column().apply{setPadding(dp(16),0,dp(16),dp(8))}
   val titles=listOf("home" to "VPN","protocol" to "Протокол","access" to "Доступ","update" to "Обновления")
@@ -170,7 +176,7 @@ class MainActivity : Activity() {
   root.add(navigation,0)
   scroll=ScrollView(this).apply{isFillViewport=true;clipToPadding=false;isVerticalScrollBarEnabled=false;overScrollMode=View.OVER_SCROLL_IF_CONTENT_SCROLLS}
   body=column().apply{setPadding(dp(20),dp(8),dp(20),dp(24))};scroll.addView(body,FrameLayout.LayoutParams(-1,-2));root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-  buildHome();buildProtocol();buildAccess();buildUpdate()
+  buildHome();buildProtocol();buildAccess();buildUpdate();buildBeta()
   notice=label("",14f).apply{setTextColor(mint);accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE};body.add(notice,16)
   body.add(label("Без рекламы и аналитики. Содержимое трафика не записывается.",14f),16)
   body.add(button("Инструкции и исходники"){openWebsite()},12)
@@ -221,6 +227,32 @@ class MainActivity : Activity() {
   updateProgress=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply{max=1000;visibility=View.GONE};item.add(updateProgress,12)
   updateButton=button("Проверить обновления",true){updateAction()};item.add(updateButton,16)
   section.add(label("Проверка выполняется при открытии этой вкладки. Файл скачивается только с сайта Chameleon, проверяется по SHA-256 и подписи разработчика, затем Android просит подтвердить установку.",14f),16)
+ }
+ private fun legName(id:String)=if(id=="vibecraft")"Vibecraft (по ссылке)" else "Стандарт (45.90.216.193)"
+ private fun buildBeta(){
+  betaSection=column();pages["home"]?.add(betaSection,16)
+  betaSection.add(label("Бета · RU-нога",23f,true),8)
+  val card=card();betaSection.add(card,12)
+  card.add(label("Выберите, через какой RU-вход идёт трафик. Vibecraft — экспериментальный вход поверх HTTPS-ссылки (у виртуалки нет своего IP). Дальше трафик уходит на зарубежную ногу и возвращается вам.",14f),0)
+  for(id in listOf("standard","vibecraft")){
+   val b=button("Выбрать ${legName(id)}"){if(!active()&&!busy.get()){store.setRuLeg(id);ruLeg=id;setLabel(notice,"RU-нога: ${legName(id)} — со следующего подключения.");render()}}
+   ruLegButtons[id]=b;card.add(b,12)
+  }
+  val probe=button("Проверить Vibecraft-ногу"){probeVibecraft(it as Button)};card.add(probe,16)
+  betaSection.add(label("Полный туннель всего трафика через vibecraft готовится в нативном ядре; сейчас доступны выбор ноги и проверка связи по ссылке.",14f),12)
+ }
+ private fun onVersionTap(){
+  if(beta)return
+  betaTaps++
+  if(betaTaps>=8){beta=true;store.setBetaEnabled(true);betaTaps=0;if(::notice.isInitialized){notice.setTextColor(mint);setLabel(notice,"Бета-режим включён. Внизу вкладки «VPN» — выбор RU-ноги.")};showPage("home");render()}
+  else if(betaTaps>=5&&::notice.isInitialized){setLabel(notice,"Ещё ${8-betaTaps} до беты…")}
+ }
+ private fun probeVibecraft(btn:Button){
+  if(busy.get())return
+  setActive(btn,false);notice.setTextColor(mint);setLabel(notice,"Проверяем Vibecraft-ногу по ссылке…")
+  Thread({val p=VibecraftLeg.probe();handler.post{if(destroyed)return@post;setActive(btn,true)
+    if(p.ok){notice.setTextColor(mint);setLabel(notice,"Vibecraft-нога работает · выход ${p.exitLabel} · ${p.exitIp}")}
+    else{notice.setTextColor(Color.rgb(255,172,166));setLabel(notice,"Vibecraft-нога недоступна: ${p.detail}")}}},"vibecraft-probe").start()
  }
  private fun checkUpdate(quiet:Boolean=false){
   if(updatePhase==UpdatePhase.CHECKING||updatePhase==UpdatePhase.DOWNLOADING)return
@@ -307,6 +339,8 @@ class MainActivity : Activity() {
   setActive(save,!active()&&!busy.get());token.isEnabled=save.isEnabled
   setLabel(ruDirectButton,if(ruDirect)"Включено · нажмите, чтобы выключить" else "Выключено · нажмите, чтобы включить");setFill(ruDirectButton,if(ruDirect)accent else Color.rgb(35,50,71));setActive(ruDirectButton,!active()&&!busy.get())
   for((mode,b) in protocolButtons){setLabel(b,if(mode==selected)"Выбран ${modeName(mode)}" else "Выбрать ${modeName(mode)}");setFill(b,if(mode==selected)accent else Color.rgb(35,50,71));setActive(b,!active()&&!busy.get())}
+  if(::betaSection.isInitialized){val bv=if(beta)View.VISIBLE else View.GONE;if(betaSection.visibility!=bv)betaSection.visibility=bv
+   for((id,b) in ruLegButtons){setLabel(b,if(id==ruLeg)"Выбрана: ${legName(id)}" else "Выбрать ${legName(id)}");setFill(b,if(id==ruLeg)accent else Color.rgb(35,50,71));setActive(b,!active()&&!busy.get())}}
   val color=if(connected)mint else if(ChamVpnService.lastError.isNotEmpty()&&!on)Color.rgb(255,172,166) else Color.rgb(143,191,247)
   mark.show(color,when{busy.get()||phase==VpnLifecycleState.STARTING||phase==VpnLifecycleState.STOPPING||(phase==VpnLifecycleState.RUNNING&&!connected)->PowerMark.Mode.BUSY;connected->PowerMark.Mode.ON;else->PowerMark.Mode.IDLE},motion())
  }
